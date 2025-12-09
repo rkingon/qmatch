@@ -1,6 +1,6 @@
 {
   "name": "qmatch",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Type-safe criteria matching for TypeScript. MongoDB-style query syntax with full autocomplete.",
   "type": "module",
   "main": "./dist/index.cjs",

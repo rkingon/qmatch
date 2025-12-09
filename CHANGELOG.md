@@ -1,5 +1,11 @@
 # qmatch
 
+## 1.0.3
+
+### Patch Changes
+
+- [`e6dc902`](https://github.com/rkingon/qmatch/commit/e6dc902a4482459fc05f3e032157688a4aac7035) Thanks [@rkingon](https://github.com/rkingon)! - upgrade npm to v11.5.1+ for OIDC trusted publishing
+
 ## 1.0.2
 
 ### Patch Changes
