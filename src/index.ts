@@ -205,15 +205,21 @@ function isOperatorObject(obj: unknown): boolean {
   return Object.keys(obj).some((key) => key.startsWith("$"));
 }
 
-function toNumber(value: unknown): number | null {
-  if (typeof value === "number") return value;
-  if (
+function hasToNumber(
+  value: unknown,
+): value is { toNumber: () => unknown } {
+  return (
     value != null &&
     typeof value === "object" &&
     "toNumber" in value &&
-    typeof (value as any).toNumber === "function"
-  ) {
-    const n = (value as any).toNumber();
+    typeof value.toNumber === "function"
+  );
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  if (hasToNumber(value)) {
+    const n = value.toNumber();
     return typeof n === "number" ? n : null;
   }
   return null;
