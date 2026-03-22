@@ -183,6 +183,63 @@ describe("match", () => {
       });
       expect(midLength(paranoidAndroid)).toBe(true);
     });
+
+    describe("toNumber() coercion", () => {
+      it("$gte coerces value with .toNumber()", () => {
+        const decimal = { toNumber: () => 25, valueOf: () => 25 };
+        const check = match({ price: { $gte: 20 } });
+        expect(check({ price: decimal as any })).toBe(true);
+      });
+
+      it("$gt coerces value with .toNumber()", () => {
+        const decimal = { toNumber: () => 25 };
+        expect(match({ price: { $gt: 20 } })({ price: decimal as any })).toBe(
+          true,
+        );
+        expect(match({ price: { $gt: 30 } })({ price: decimal as any })).toBe(
+          false,
+        );
+      });
+
+      it("$lt coerces value with .toNumber()", () => {
+        const decimal = { toNumber: () => 25 };
+        expect(match({ price: { $lt: 30 } })({ price: decimal as any })).toBe(
+          true,
+        );
+        expect(match({ price: { $lt: 20 } })({ price: decimal as any })).toBe(
+          false,
+        );
+      });
+
+      it("$lte coerces value with .toNumber()", () => {
+        const decimal = { toNumber: () => 25 };
+        expect(
+          match({ price: { $lte: 25 } })({ price: decimal as any }),
+        ).toBe(true);
+        expect(
+          match({ price: { $lte: 24 } })({ price: decimal as any }),
+        ).toBe(false);
+      });
+
+      it("does NOT coerce plain strings", () => {
+        expect(
+          match({ price: { $gte: 20 } })({ price: "25" as any }),
+        ).toBe(false);
+      });
+
+      it("does NOT coerce if .toNumber() returns non-number", () => {
+        const bad = { toNumber: () => "not a number" };
+        expect(
+          match({ price: { $gte: 20 } })({ price: bad as any }),
+        ).toBe(false);
+      });
+
+      it("works in range queries with coerced values", () => {
+        const decimal = { toNumber: () => 25 };
+        const inRange = match({ price: { $gte: 20, $lte: 30 } });
+        expect(inRange({ price: decimal as any })).toBe(true);
+      });
+    });
   });
 
   describe("$in operator", () => {
