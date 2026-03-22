@@ -185,59 +185,69 @@ describe("match", () => {
     });
 
     describe("toNumber() coercion", () => {
+      interface Decimal {
+        toNumber: () => number;
+      }
+      interface Product {
+        price: number | Decimal;
+      }
+
+      const decimal: Decimal = { toNumber: () => 25 };
+
       it("$gte coerces value with .toNumber()", () => {
-        const decimal = { toNumber: () => 25, valueOf: () => 25 };
-        const check = match({ price: { $gte: 20 } });
-        expect(check({ price: decimal as any })).toBe(true);
+        const check = match<Product>({ price: { $gte: 20 } });
+        expect(check({ price: decimal })).toBe(true);
       });
 
       it("$gt coerces value with .toNumber()", () => {
-        const decimal = { toNumber: () => 25 };
-        expect(match({ price: { $gt: 20 } })({ price: decimal as any })).toBe(
-          true,
-        );
-        expect(match({ price: { $gt: 30 } })({ price: decimal as any })).toBe(
-          false,
-        );
+        expect(
+          match<Product>({ price: { $gt: 20 } })({ price: decimal }),
+        ).toBe(true);
+        expect(
+          match<Product>({ price: { $gt: 30 } })({ price: decimal }),
+        ).toBe(false);
       });
 
       it("$lt coerces value with .toNumber()", () => {
-        const decimal = { toNumber: () => 25 };
-        expect(match({ price: { $lt: 30 } })({ price: decimal as any })).toBe(
-          true,
-        );
-        expect(match({ price: { $lt: 20 } })({ price: decimal as any })).toBe(
-          false,
-        );
+        expect(
+          match<Product>({ price: { $lt: 30 } })({ price: decimal }),
+        ).toBe(true);
+        expect(
+          match<Product>({ price: { $lt: 20 } })({ price: decimal }),
+        ).toBe(false);
       });
 
       it("$lte coerces value with .toNumber()", () => {
-        const decimal = { toNumber: () => 25 };
         expect(
-          match({ price: { $lte: 25 } })({ price: decimal as any }),
+          match<Product>({ price: { $lte: 25 } })({ price: decimal }),
         ).toBe(true);
         expect(
-          match({ price: { $lte: 24 } })({ price: decimal as any }),
+          match<Product>({ price: { $lte: 24 } })({ price: decimal }),
         ).toBe(false);
       });
 
       it("does NOT coerce plain strings", () => {
         expect(
-          match({ price: { $gte: 20 } })({ price: "25" as any }),
+          match<{ price: number | string }>({ price: { $gte: 20 } })({
+            price: "25",
+          }),
         ).toBe(false);
       });
 
       it("does NOT coerce if .toNumber() returns non-number", () => {
         const bad = { toNumber: () => "not a number" };
         expect(
-          match({ price: { $gte: 20 } })({ price: bad as any }),
+          match<{ price: number | { toNumber: () => string } }>({
+            price: { $gte: 20 },
+          })({ price: bad }),
         ).toBe(false);
       });
 
       it("works in range queries with coerced values", () => {
-        const decimal = { toNumber: () => 25 };
-        const inRange = match({ price: { $gte: 20, $lte: 30 } });
-        expect(inRange({ price: decimal as any })).toBe(true);
+        const inRange = match<Product>({
+          price: { $gte: 20, $lte: 30 },
+        });
+        expect(inRange({ price: decimal })).toBe(true);
       });
     });
   });
