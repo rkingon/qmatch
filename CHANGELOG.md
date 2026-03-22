@@ -1,5 +1,11 @@
 # qmatch
 
+## 1.1.0
+
+### Minor Changes
+
+- [#1](https://github.com/rkingon/qmatch/pull/1) [`e763614`](https://github.com/rkingon/qmatch/commit/e7636141c2c3107175bdd7f10f65a972868f33a3) Thanks [@rkingon](https://github.com/rkingon)! - Add `$some` and `$every` array operators. `$some` matches when at least one array element satisfies a sub-query (equivalent to MongoDB's `$elemMatch`). `$every` matches when all elements satisfy the sub-query. Both support primitive and object arrays with full type safety.
+
 ## 1.0.3
 
 ### Patch Changes
