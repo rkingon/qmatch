@@ -1083,4 +1083,162 @@ describe("explain", () => {
       expect(result.failure?.actual).toBe(25_000_000);
     });
   });
+
+  describe("$some and $every", () => {
+    // Type with object array for testing
+    interface TrackList {
+      name: string;
+      tracks: Song[];
+      tags: string[];
+    }
+
+    const trackList: TrackList = {
+      name: "Best Of",
+      tracks: sampleSongs,
+      tags: ["rock", "electronic", "alternative"],
+    };
+
+    const emptyTrackList: TrackList = {
+      name: "Empty",
+      tracks: [],
+      tags: [],
+    };
+
+    describe("$some", () => {
+      it("matches when at least one primitive element matches", () => {
+        const hasRock = match<Artist>({
+          genres: { $some: { $eq: "rock" } },
+        });
+        expect(hasRock(radiohead)).toBe(true);
+      });
+
+      it("matches with $regex on primitive array", () => {
+        const hasElectronic = match<TrackList>({
+          tags: { $some: { $regex: /^elect/ } },
+        });
+        expect(hasElectronic(trackList)).toBe(true);
+      });
+
+      it("does not match when no elements match", () => {
+        const hasJazz = match<Artist>({
+          genres: { $some: { $eq: "jazz" } },
+        });
+        expect(hasJazz(radiohead)).toBe(false);
+      });
+
+      it("does not match on empty array", () => {
+        const hasAny = match<TrackList>({
+          tags: { $some: { $regex: /.*/ } },
+        });
+        expect(hasAny(emptyTrackList)).toBe(false);
+      });
+
+      it("matches when at least one object element matches", () => {
+        const hasPopularTrack = match<TrackList>({
+          tracks: { $some: { plays: { $gte: 100_000_000 } } },
+        });
+        expect(hasPopularTrack(trackList)).toBe(true);
+      });
+
+      it("does not match when no object elements match", () => {
+        const hasBillionPlays = match<TrackList>({
+          tracks: { $some: { plays: { $gte: 1_000_000_000 } } },
+        });
+        expect(hasBillionPlays(trackList)).toBe(false);
+      });
+
+      it("works with nested object queries in $some", () => {
+        const hasTrackFromOkComputer = match<TrackList>({
+          tracks: {
+            $some: {
+              album: {
+                title: "OK Computer",
+              },
+            },
+          },
+        });
+        expect(hasTrackFromOkComputer(trackList)).toBe(true);
+      });
+
+      it("can combine with other array operators", () => {
+        const threeTagsWithRock = match<TrackList>({
+          tags: { $size: 3, $some: { $eq: "rock" } },
+        });
+        expect(threeTagsWithRock(trackList)).toBe(true);
+        expect(threeTagsWithRock(emptyTrackList)).toBe(false);
+      });
+    });
+
+    describe("$every", () => {
+      it("matches when all primitive elements match", () => {
+        const allInAllowList = match<Artist>({
+          genres: {
+            $every: {
+              $in: ["rock", "electronic", "alternative", "indie"],
+            },
+          },
+        });
+        expect(allInAllowList(radiohead)).toBe(true);
+      });
+
+      it("does not match when some elements fail", () => {
+        const allRock = match<Artist>({
+          genres: { $every: { $eq: "rock" } },
+        });
+        expect(allRock(radiohead)).toBe(false);
+      });
+
+      it("matches on empty array (vacuous truth)", () => {
+        const allMatch = match<TrackList>({
+          tags: { $every: { $regex: /impossible/ } },
+        });
+        expect(allMatch(emptyTrackList)).toBe(true);
+      });
+
+      it("matches when all object elements match", () => {
+        const allNonExplicit = match<TrackList>({
+          tracks: { $every: { explicit: false } },
+        });
+        // sampleSongs[2] is explicit: true
+        expect(allNonExplicit(trackList)).toBe(false);
+      });
+
+      it("matches when all object elements truly match", () => {
+        const allHaveId = match<TrackList>({
+          tracks: { $every: { id: { $gte: 1 } } },
+        });
+        expect(allHaveId(trackList)).toBe(true);
+      });
+
+      it("works with $regex on all elements", () => {
+        const allStartWithLetters = match<TrackList>({
+          tags: { $every: { $regex: /^[a-z]/ } },
+        });
+        expect(allStartWithLetters(trackList)).toBe(true);
+      });
+    });
+
+    describe("explain", () => {
+      it("explains $some failure", () => {
+        const hasJazz = match<Artist>({
+          genres: { $some: { $eq: "jazz" } },
+        });
+        const result = hasJazz.explain(radiohead);
+        expect(result.matched).toBe(false);
+        expect(result.failure?.path).toBe("genres");
+        expect(result.failure?.operator).toBe("$some");
+      });
+
+      it("explains $every failure with path to failing element", () => {
+        const allRock = match<Artist>({
+          genres: { $every: { $eq: "rock" } },
+        });
+        const result = allRock.explain(radiohead);
+        expect(result.matched).toBe(false);
+        expect(result.failure?.operator).toBe("$eq");
+        // Should show path to the failing element
+        expect(result.failure?.path).toMatch(/genres\[\d+\]/);
+      });
+    });
+  });
 });
