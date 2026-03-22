@@ -190,10 +190,27 @@ match<User>({
 |----------|-------------|
 | `$contains` | Array includes value |
 | `$size` | Array length equals |
+| `$some` | At least one element matches |
+| `$every` | All elements match |
 
 ```typescript
 match<Artist>({
   genres: { $contains: 'rock', $size: 3 },
+});
+
+// $some — at least one element matches the sub-query
+match<Artist>({
+  genres: { $some: { $regex: /^alt/ } },
+});
+
+// $every — all elements must match
+match<Artist>({
+  genres: { $every: { $in: ['rock', 'alternative', 'electronic'] } },
+});
+
+// Works with object arrays too
+match<Playlist>({
+  tracks: { $some: { plays: { $gte: 1_000_000 } } },
 });
 ```
 
@@ -340,6 +357,8 @@ function filterUsers(users: User[], matcher: Matcher<User>): User[] {
 | Empty `$and: []` | Matches everything |
 | Null nested object | Fails unless `$exists: false` |
 | Comparison on null | Returns false |
+| `$every` on empty array | Matches (vacuous truth) |
+| `$some` on empty array | Does not match |
 
 ## Contributing
 

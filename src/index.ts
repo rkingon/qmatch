@@ -49,7 +49,16 @@ type CustomOperator<T> = {
  * Array operators - only for array fields
  */
 type ArrayOperators<T> = T extends (infer U)[]
-  ? { $contains?: U; $size?: number }
+  ? {
+      $contains?: U;
+      $size?: number;
+      $some?: [IsPlainObject<NonNullable<U>>] extends [true]
+        ? Query<NonNullable<U>>
+        : PrimitiveOperators<U>;
+      $every?: [IsPlainObject<NonNullable<U>>] extends [true]
+        ? Query<NonNullable<U>>
+        : PrimitiveOperators<U>;
+    }
   : object;
 
 /**
@@ -161,6 +170,8 @@ const OPERATOR_KEYS = new Set([
   "$exists",
   "$regex",
   "$fn",
+  "$some",
+  "$every",
   "$and",
   "$or",
   "$not",
@@ -355,6 +366,75 @@ function matchOperators<T>(
     }
     if (value.length !== ops.$size) {
       return fail(path, "$size", ops.$size, value.length);
+    }
+  }
+
+  // $some - at least one array element matches
+  if ("$some" in ops) {
+    if (!Array.isArray(value)) {
+      return fail(path, "$some", "array", typeof value);
+    }
+    const subQuery = ops.$some;
+    const anyMatch = value.some((element, i) => {
+      if (
+        element !== null &&
+        typeof element === "object" &&
+        !Array.isArray(element) &&
+        !(element instanceof Date)
+      ) {
+        return matchQueryInternal(
+          element as Record<string, unknown>,
+          subQuery as Query<Record<string, unknown>>,
+          `${path}[${i}]`,
+        ).matched;
+      }
+      if (isOperatorObject(subQuery)) {
+        return matchOperators(
+          element,
+          subQuery as PrimitiveOperators<unknown>,
+          `${path}[${i}]`,
+        ).matched;
+      }
+      return element === subQuery;
+    });
+    if (!anyMatch) {
+      return fail(path, "$some", "at least one element to match", value);
+    }
+  }
+
+  // $every - all array elements must match
+  if ("$every" in ops) {
+    if (!Array.isArray(value)) {
+      return fail(path, "$every", "array", typeof value);
+    }
+    const subQuery = ops.$every;
+    for (let i = 0; i < value.length; i++) {
+      const element = value[i];
+      let result: MatchResult;
+      if (
+        element !== null &&
+        typeof element === "object" &&
+        !Array.isArray(element) &&
+        !(element instanceof Date)
+      ) {
+        result = matchQueryInternal(
+          element as Record<string, unknown>,
+          subQuery as Query<Record<string, unknown>>,
+          `${path}[${i}]`,
+        );
+      } else if (isOperatorObject(subQuery)) {
+        result = matchOperators(
+          element,
+          subQuery as PrimitiveOperators<unknown>,
+          `${path}[${i}]`,
+        );
+      } else {
+        result =
+          element === subQuery
+            ? pass
+            : fail(`${path}[${i}]`, "$every", subQuery, element);
+      }
+      if (!result.matched) return result;
     }
   }
 
