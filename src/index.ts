@@ -205,6 +205,26 @@ function isOperatorObject(obj: unknown): boolean {
   return Object.keys(obj).some((key) => key.startsWith("$"));
 }
 
+function hasToNumber(
+  value: unknown,
+): value is { toNumber: () => unknown } {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    "toNumber" in value &&
+    typeof value.toNumber === "function"
+  );
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  if (hasToNumber(value)) {
+    const n = value.toNumber();
+    return typeof n === "number" ? n : null;
+  }
+  return null;
+}
+
 /**
  * Match a value against primitive operators
  */
@@ -258,8 +278,9 @@ function matchOperators<T>(
 
   // $gt - greater than
   if ("$gt" in ops) {
-    if (typeof value === "number" && typeof ops.$gt === "number") {
-      if (value <= ops.$gt) {
+    const numVal = toNumber(value);
+    if (numVal !== null && typeof ops.$gt === "number") {
+      if (numVal <= ops.$gt) {
         return fail(path, "$gt", `> ${ops.$gt}`, value);
       }
     } else if (value instanceof Date && ops.$gt instanceof Date) {
@@ -273,8 +294,9 @@ function matchOperators<T>(
 
   // $gte - greater than or equal
   if ("$gte" in ops) {
-    if (typeof value === "number" && typeof ops.$gte === "number") {
-      if (value < ops.$gte) {
+    const numVal = toNumber(value);
+    if (numVal !== null && typeof ops.$gte === "number") {
+      if (numVal < ops.$gte) {
         return fail(path, "$gte", `>= ${ops.$gte}`, value);
       }
     } else if (value instanceof Date && ops.$gte instanceof Date) {
@@ -288,8 +310,9 @@ function matchOperators<T>(
 
   // $lt - less than
   if ("$lt" in ops) {
-    if (typeof value === "number" && typeof ops.$lt === "number") {
-      if (value >= ops.$lt) {
+    const numVal = toNumber(value);
+    if (numVal !== null && typeof ops.$lt === "number") {
+      if (numVal >= ops.$lt) {
         return fail(path, "$lt", `< ${ops.$lt}`, value);
       }
     } else if (value instanceof Date && ops.$lt instanceof Date) {
@@ -303,8 +326,9 @@ function matchOperators<T>(
 
   // $lte - less than or equal
   if ("$lte" in ops) {
-    if (typeof value === "number" && typeof ops.$lte === "number") {
-      if (value > ops.$lte) {
+    const numVal = toNumber(value);
+    if (numVal !== null && typeof ops.$lte === "number") {
+      if (numVal > ops.$lte) {
         return fail(path, "$lte", `<= ${ops.$lte}`, value);
       }
     } else if (value instanceof Date && ops.$lte instanceof Date) {

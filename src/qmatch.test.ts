@@ -183,6 +183,73 @@ describe("match", () => {
       });
       expect(midLength(paranoidAndroid)).toBe(true);
     });
+
+    describe("toNumber() coercion", () => {
+      interface Decimal {
+        toNumber: () => number;
+      }
+      interface Product {
+        price: number | Decimal;
+      }
+
+      const decimal: Decimal = { toNumber: () => 25 };
+
+      it("$gte coerces value with .toNumber()", () => {
+        const check = match<Product>({ price: { $gte: 20 } });
+        expect(check({ price: decimal })).toBe(true);
+      });
+
+      it("$gt coerces value with .toNumber()", () => {
+        expect(
+          match<Product>({ price: { $gt: 20 } })({ price: decimal }),
+        ).toBe(true);
+        expect(
+          match<Product>({ price: { $gt: 30 } })({ price: decimal }),
+        ).toBe(false);
+      });
+
+      it("$lt coerces value with .toNumber()", () => {
+        expect(
+          match<Product>({ price: { $lt: 30 } })({ price: decimal }),
+        ).toBe(true);
+        expect(
+          match<Product>({ price: { $lt: 20 } })({ price: decimal }),
+        ).toBe(false);
+      });
+
+      it("$lte coerces value with .toNumber()", () => {
+        expect(
+          match<Product>({ price: { $lte: 25 } })({ price: decimal }),
+        ).toBe(true);
+        expect(
+          match<Product>({ price: { $lte: 24 } })({ price: decimal }),
+        ).toBe(false);
+      });
+
+      it("does NOT coerce plain strings", () => {
+        expect(
+          match<{ price: number | string }>({ price: { $gte: 20 } })({
+            price: "25",
+          }),
+        ).toBe(false);
+      });
+
+      it("does NOT coerce if .toNumber() returns non-number", () => {
+        const bad = { toNumber: () => "not a number" };
+        expect(
+          match<{ price: number | { toNumber: () => string } }>({
+            price: { $gte: 20 },
+          })({ price: bad }),
+        ).toBe(false);
+      });
+
+      it("works in range queries with coerced values", () => {
+        const inRange = match<Product>({
+          price: { $gte: 20, $lte: 30 },
+        });
+        expect(inRange({ price: decimal })).toBe(true);
+      });
+    });
   });
 
   describe("$in operator", () => {
