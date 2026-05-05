@@ -294,6 +294,26 @@ describe("match", () => {
       const notRock = match<Song>({ genre: { $ne: "rock" } });
       expect(notRock(paranoidAndroid)).toBe(false);
     });
+
+    describe("nullable boolean", () => {
+      interface Toggle {
+        enabled: boolean | null;
+      }
+
+      const notTrue = match<Toggle>({ enabled: { $ne: true } });
+
+      it("$ne: true matches false", () => {
+        expect(notTrue({ enabled: false })).toBe(true);
+      });
+
+      it("$ne: true matches null", () => {
+        expect(notTrue({ enabled: null })).toBe(true);
+      });
+
+      it("$ne: true does not match true", () => {
+        expect(notTrue({ enabled: true })).toBe(false);
+      });
+    });
   });
 
   describe("multiple conditions (implicit AND)", () => {

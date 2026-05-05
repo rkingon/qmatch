@@ -243,9 +243,24 @@ function matchOperators<T>(
     }
   }
 
-  // If value is null/undefined, other operators fail (except $exists handled above)
+  // $ne - not equal. Handled before the null short-circuit so that
+  // e.g. { $ne: true } matches both null and false.
+  if ("$ne" in ops) {
+    const notExpected = ops.$ne;
+    if (value instanceof Date && notExpected instanceof Date) {
+      if (value.getTime() === notExpected.getTime()) {
+        return fail(path, "$ne", `not ${notExpected}`, value);
+      }
+    } else if (value === notExpected) {
+      return fail(path, "$ne", `not ${notExpected}`, value);
+    }
+  }
+
+  // If value is null/undefined, other operators fail (except $exists/$ne handled above)
   if (value === null || value === undefined) {
-    const otherOps = Object.keys(ops).filter((k) => k !== "$exists");
+    const otherOps = Object.keys(ops).filter(
+      (k) => k !== "$exists" && k !== "$ne",
+    );
     if (otherOps.length > 0) {
       return fail(path, otherOps[0], ops[otherOps[0]], value);
     }
@@ -261,18 +276,6 @@ function matchOperators<T>(
       }
     } else if (value !== expected) {
       return fail(path, "$eq", expected, value);
-    }
-  }
-
-  // $ne - not equal
-  if ("$ne" in ops) {
-    const notExpected = ops.$ne;
-    if (value instanceof Date && notExpected instanceof Date) {
-      if (value.getTime() === notExpected.getTime()) {
-        return fail(path, "$ne", `not ${notExpected}`, value);
-      }
-    } else if (value === notExpected) {
-      return fail(path, "$ne", `not ${notExpected}`, value);
     }
   }
 
