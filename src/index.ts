@@ -243,16 +243,10 @@ function matchOperators<T>(
     }
   }
 
-  // If value is null/undefined, other operators fail (except $exists handled above)
-  if (value === null || value === undefined) {
-    const otherOps = Object.keys(ops).filter((k) => k !== "$exists");
-    if (otherOps.length > 0) {
-      return fail(path, otherOps[0], ops[otherOps[0]], value);
-    }
-    return pass;
-  }
-
-  // $eq - equality
+  // Equality operators ($eq, $ne, $in, $nin) are handled before the
+  // null/undefined short-circuit so that e.g. { $eq: null } matches a
+  // null value, { $ne: true } matches null, etc. They use strict ===
+  // semantics, matching JS equality (undefined !== null).
   if ("$eq" in ops) {
     const expected = ops.$eq;
     if (value instanceof Date && expected instanceof Date) {
@@ -264,7 +258,6 @@ function matchOperators<T>(
     }
   }
 
-  // $ne - not equal
   if ("$ne" in ops) {
     const notExpected = ops.$ne;
     if (value instanceof Date && notExpected instanceof Date) {
@@ -274,6 +267,53 @@ function matchOperators<T>(
     } else if (value === notExpected) {
       return fail(path, "$ne", `not ${notExpected}`, value);
     }
+  }
+
+  if ("$in" in ops) {
+    const arr = ops.$in;
+    if (!Array.isArray(arr)) {
+      return fail(path, "$in", "array", typeof arr);
+    }
+    if (value instanceof Date) {
+      const time = value.getTime();
+      if (!arr.some((d) => d instanceof Date && d.getTime() === time)) {
+        return fail(path, "$in", arr, value);
+      }
+    } else if (!arr.includes(value)) {
+      return fail(path, "$in", arr, value);
+    }
+  }
+
+  if ("$nin" in ops) {
+    const arr = ops.$nin;
+    if (!Array.isArray(arr)) {
+      return fail(path, "$nin", "array", typeof arr);
+    }
+    if (value instanceof Date) {
+      const time = value.getTime();
+      if (arr.some((d) => d instanceof Date && d.getTime() === time)) {
+        return fail(path, "$nin", `not in [${arr}]`, value);
+      }
+    } else if (arr.includes(value)) {
+      return fail(path, "$nin", `not in [${arr}]`, value);
+    }
+  }
+
+  // If value is null/undefined, remaining operators fail. Equality
+  // operators ($eq, $ne, $in, $nin) and $exists are handled above.
+  if (value === null || value === undefined) {
+    const otherOps = Object.keys(ops).filter(
+      (k) =>
+        k !== "$exists" &&
+        k !== "$eq" &&
+        k !== "$ne" &&
+        k !== "$in" &&
+        k !== "$nin",
+    );
+    if (otherOps.length > 0) {
+      return fail(path, otherOps[0], ops[otherOps[0]], value);
+    }
+    return pass;
   }
 
   // $gt - greater than
@@ -337,38 +377,6 @@ function matchOperators<T>(
       }
     } else {
       return fail(path, "$lte", `<= ${ops.$lte}`, value);
-    }
-  }
-
-  // $in - value in array
-  if ("$in" in ops) {
-    const arr = ops.$in;
-    if (!Array.isArray(arr)) {
-      return fail(path, "$in", "array", typeof arr);
-    }
-    if (value instanceof Date) {
-      const time = value.getTime();
-      if (!arr.some((d) => d instanceof Date && d.getTime() === time)) {
-        return fail(path, "$in", arr, value);
-      }
-    } else if (!arr.includes(value)) {
-      return fail(path, "$in", arr, value);
-    }
-  }
-
-  // $nin - value not in array
-  if ("$nin" in ops) {
-    const arr = ops.$nin;
-    if (!Array.isArray(arr)) {
-      return fail(path, "$nin", "array", typeof arr);
-    }
-    if (value instanceof Date) {
-      const time = value.getTime();
-      if (arr.some((d) => d instanceof Date && d.getTime() === time)) {
-        return fail(path, "$nin", `not in [${arr}]`, value);
-      }
-    } else if (arr.includes(value)) {
-      return fail(path, "$nin", `not in [${arr}]`, value);
     }
   }
 
