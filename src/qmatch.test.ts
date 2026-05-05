@@ -318,6 +318,16 @@ describe("match", () => {
         expect(notNull({ enabled: true })).toBe(true);
         expect(notNull({ enabled: false })).toBe(true);
       });
+
+      it("$nin: [null] matches undefined (strict equality, not loose null)", () => {
+        const notNull = match<Toggle>({ enabled: { $nin: [null] } });
+        expect(notNull({ enabled: undefined as unknown as null })).toBe(true);
+      });
+
+      it("$nin: [null] matches missing field (strict equality, not loose null)", () => {
+        const notNull = match<Toggle>({ enabled: { $nin: [null] } });
+        expect(notNull({} as Toggle)).toBe(true);
+      });
     });
   });
 
@@ -364,6 +374,16 @@ describe("match", () => {
       it("$ne: null does not match null", () => {
         const notNull = match<Toggle>({ enabled: { $ne: null } });
         expect(notNull({ enabled: null })).toBe(false);
+      });
+
+      it("$ne: null matches undefined (strict equality, not loose null)", () => {
+        const notNull = match<Toggle>({ enabled: { $ne: null } });
+        expect(notNull({ enabled: undefined as unknown as null })).toBe(true);
+      });
+
+      it("$ne: null matches missing field (strict equality, not loose null)", () => {
+        const notNull = match<Toggle>({ enabled: { $ne: null } });
+        expect(notNull({} as Toggle)).toBe(true);
       });
     });
   });
