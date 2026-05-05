@@ -146,6 +146,46 @@ describe("match", () => {
     });
   });
 
+  describe("$eq operator with null", () => {
+    interface Toggle {
+      enabled: boolean | null;
+    }
+
+    it("$eq: null matches null", () => {
+      const isNull = match<Toggle>({ enabled: { $eq: null } });
+      expect(isNull({ enabled: null })).toBe(true);
+    });
+
+    it("$eq: null does not match undefined (strict equality)", () => {
+      const isNull = match<Toggle>({ enabled: { $eq: null } });
+      expect(isNull({ enabled: undefined as unknown as null })).toBe(false);
+    });
+
+    it("$eq: null does not match missing field (strict equality)", () => {
+      const isNull = match<Toggle>({ enabled: { $eq: null } });
+      expect(isNull({} as Toggle)).toBe(false);
+    });
+
+    it("$eq: null does not match non-null values", () => {
+      const isNull = match<Toggle>({ enabled: { $eq: null } });
+      expect(isNull({ enabled: true })).toBe(false);
+      expect(isNull({ enabled: false })).toBe(false);
+    });
+
+    it("explicit $eq: null and implicit { field: null } agree", () => {
+      const explicit = match<Toggle>({ enabled: { $eq: null } });
+      const implicit = match<Toggle>({ enabled: null });
+      const cases: Toggle[] = [
+        { enabled: null },
+        { enabled: true },
+        { enabled: false },
+      ];
+      for (const c of cases) {
+        expect(explicit(c)).toBe(implicit(c));
+      }
+    });
+  });
+
   describe("comparison operators", () => {
     it("$gte matches greater or equal", () => {
       const popular = match<Song>({ plays: { $gte: 100_000_000 } });
@@ -265,6 +305,42 @@ describe("match", () => {
         genre: { $in: ["jazz", "classical"] },
       });
       expect(jazzOrClassical(paranoidAndroid)).toBe(false);
+    });
+
+    describe("nullable boolean", () => {
+      interface Toggle {
+        enabled: boolean | null;
+      }
+
+      it("$in: [null] matches null", () => {
+        const isNull = match<Toggle>({ enabled: { $in: [null] } });
+        expect(isNull({ enabled: null })).toBe(true);
+      });
+
+      it("$in: [null] does not match undefined (strict equality)", () => {
+        const isNull = match<Toggle>({ enabled: { $in: [null] } });
+        expect(isNull({ enabled: undefined as unknown as null })).toBe(false);
+      });
+
+      it("$in: [null] does not match missing field (strict equality)", () => {
+        const isNull = match<Toggle>({ enabled: { $in: [null] } });
+        expect(isNull({} as Toggle)).toBe(false);
+      });
+
+      it("$in: [null] does not match non-null values", () => {
+        const isNull = match<Toggle>({ enabled: { $in: [null] } });
+        expect(isNull({ enabled: true })).toBe(false);
+        expect(isNull({ enabled: false })).toBe(false);
+      });
+
+      it("$in: [null, true] matches both null and true", () => {
+        const nullOrTrue = match<Toggle>({
+          enabled: { $in: [null, true] },
+        });
+        expect(nullOrTrue({ enabled: null })).toBe(true);
+        expect(nullOrTrue({ enabled: true })).toBe(true);
+        expect(nullOrTrue({ enabled: false })).toBe(false);
+      });
     });
   });
 
