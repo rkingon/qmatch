@@ -282,6 +282,43 @@ describe("match", () => {
       });
       expect(notRock(paranoidAndroid)).toBe(false);
     });
+
+    describe("nullable boolean", () => {
+      interface Toggle {
+        enabled: boolean | null;
+      }
+
+      it("$nin: [true] matches null", () => {
+        const notTrue = match<Toggle>({ enabled: { $nin: [true] } });
+        expect(notTrue({ enabled: null })).toBe(true);
+      });
+
+      it("$nin: [true] matches undefined (missing field)", () => {
+        const notTrue = match<Toggle>({ enabled: { $nin: [true] } });
+        expect(notTrue({} as Toggle)).toBe(true);
+      });
+
+      it("$nin: [true] matches false", () => {
+        const notTrue = match<Toggle>({ enabled: { $nin: [true] } });
+        expect(notTrue({ enabled: false })).toBe(true);
+      });
+
+      it("$nin: [true] does not match true", () => {
+        const notTrue = match<Toggle>({ enabled: { $nin: [true] } });
+        expect(notTrue({ enabled: true })).toBe(false);
+      });
+
+      it("$nin: [null] does not match null", () => {
+        const notNull = match<Toggle>({ enabled: { $nin: [null] } });
+        expect(notNull({ enabled: null })).toBe(false);
+      });
+
+      it("$nin: [null] matches non-null values", () => {
+        const notNull = match<Toggle>({ enabled: { $nin: [null] } });
+        expect(notNull({ enabled: true })).toBe(true);
+        expect(notNull({ enabled: false })).toBe(true);
+      });
+    });
   });
 
   describe("$ne operator", () => {

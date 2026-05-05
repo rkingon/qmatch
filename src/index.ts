@@ -243,8 +243,9 @@ function matchOperators<T>(
     }
   }
 
-  // $ne - not equal. Handled before the null short-circuit so that
-  // e.g. { $ne: true } matches both null and false.
+  // $ne and $nin have negation semantics, so they're handled before the
+  // null short-circuit: e.g. { $ne: true } and { $nin: [true] } should
+  // match a null/undefined value (it's not equal to / not in [true]).
   if ("$ne" in ops) {
     const notExpected = ops.$ne;
     if (value instanceof Date && notExpected instanceof Date) {
@@ -256,10 +257,26 @@ function matchOperators<T>(
     }
   }
 
-  // If value is null/undefined, other operators fail (except $exists/$ne handled above)
+  if ("$nin" in ops) {
+    const arr = ops.$nin;
+    if (!Array.isArray(arr)) {
+      return fail(path, "$nin", "array", typeof arr);
+    }
+    if (value instanceof Date) {
+      const time = value.getTime();
+      if (arr.some((d) => d instanceof Date && d.getTime() === time)) {
+        return fail(path, "$nin", `not in [${arr}]`, value);
+      }
+    } else if (arr.includes(value)) {
+      return fail(path, "$nin", `not in [${arr}]`, value);
+    }
+  }
+
+  // If value is null/undefined, other operators fail (negation operators
+  // $ne and $nin are handled above, alongside $exists).
   if (value === null || value === undefined) {
     const otherOps = Object.keys(ops).filter(
-      (k) => k !== "$exists" && k !== "$ne",
+      (k) => k !== "$exists" && k !== "$ne" && k !== "$nin",
     );
     if (otherOps.length > 0) {
       return fail(path, otherOps[0], ops[otherOps[0]], value);
@@ -356,22 +373,6 @@ function matchOperators<T>(
       }
     } else if (!arr.includes(value)) {
       return fail(path, "$in", arr, value);
-    }
-  }
-
-  // $nin - value not in array
-  if ("$nin" in ops) {
-    const arr = ops.$nin;
-    if (!Array.isArray(arr)) {
-      return fail(path, "$nin", "array", typeof arr);
-    }
-    if (value instanceof Date) {
-      const time = value.getTime();
-      if (arr.some((d) => d instanceof Date && d.getTime() === time)) {
-        return fail(path, "$nin", `not in [${arr}]`, value);
-      }
-    } else if (arr.includes(value)) {
-      return fail(path, "$nin", `not in [${arr}]`, value);
     }
   }
 
