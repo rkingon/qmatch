@@ -310,8 +310,23 @@ describe("match", () => {
         expect(notTrue({ enabled: null })).toBe(true);
       });
 
+      it("$ne: true matches undefined (missing field)", () => {
+        expect(notTrue({} as Toggle)).toBe(true);
+      });
+
       it("$ne: true does not match true", () => {
         expect(notTrue({ enabled: true })).toBe(false);
+      });
+
+      it("$ne: null matches non-null values", () => {
+        const notNull = match<Toggle>({ enabled: { $ne: null } });
+        expect(notNull({ enabled: true })).toBe(true);
+        expect(notNull({ enabled: false })).toBe(true);
+      });
+
+      it("$ne: null does not match null", () => {
+        const notNull = match<Toggle>({ enabled: { $ne: null } });
+        expect(notNull({ enabled: null })).toBe(false);
       });
     });
   });
