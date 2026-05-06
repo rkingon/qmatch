@@ -1476,4 +1476,211 @@ describe("explain", () => {
       });
     });
   });
+
+  // Regression tests for issue #6: mixing logical operators with sibling field
+  // keys inside a nested object must enforce both, not silently drop the
+  // field keys.
+  describe("nested logical operators mixed with field keys (issue #6)", () => {
+    interface User {
+      profile: {
+        age: number;
+        country: string;
+      };
+    }
+
+    const usAdult: User = { profile: { age: 30, country: "US" } };
+    const usMinor: User = { profile: { age: 12, country: "US" } };
+    const ukAdult: User = { profile: { age: 30, country: "UK" } };
+
+    describe("$where + field at depth >= 1", () => {
+      it("enforces sibling field constraint when $where passes", () => {
+        const query = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $where: (p) => p.country === "US",
+          },
+        });
+        expect(query(usAdult)).toBe(true);
+        expect(query(usMinor)).toBe(false); // age fails
+        expect(query(ukAdult)).toBe(false); // $where fails
+      });
+
+      it("equivalent regardless of key order", () => {
+        const whereFirst = match<User>({
+          profile: {
+            $where: (p) => p.country === "US",
+            age: { $gte: 18 },
+          },
+        });
+        const fieldFirst = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $where: (p) => p.country === "US",
+          },
+        });
+        for (const item of [usAdult, usMinor, ukAdult]) {
+          expect(whereFirst(item)).toBe(fieldFirst(item));
+        }
+      });
+
+      it("explain reports the failing sibling field", () => {
+        const query = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $where: (p) => p.country === "US",
+          },
+        });
+        const result = query.explain(usMinor);
+        expect(result.matched).toBe(false);
+        expect(result.failure?.path).toBe("profile.age");
+        expect(result.failure?.operator).toBe("$gte");
+        expect(result.failure?.actual).toBe(12);
+      });
+    });
+
+    describe("$and + field at depth >= 1", () => {
+      it("enforces sibling field constraint when $and passes", () => {
+        const query = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $and: [{ country: { $in: ["US", "CA"] } }],
+          },
+        });
+        expect(query(usAdult)).toBe(true);
+        expect(query(usMinor)).toBe(false); // age fails
+        expect(query(ukAdult)).toBe(false); // $and fails (UK not in list)
+      });
+    });
+
+    describe("$or + field at depth >= 1", () => {
+      it("enforces sibling field constraint when $or passes", () => {
+        const query = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $or: [{ country: "US" }, { country: "CA" }],
+          },
+        });
+        expect(query(usAdult)).toBe(true);
+        expect(query(usMinor)).toBe(false); // age fails
+        expect(query(ukAdult)).toBe(false); // $or fails
+      });
+    });
+
+    describe("$not + field at depth >= 1", () => {
+      it("enforces sibling field constraint when $not passes", () => {
+        const query = match<User>({
+          profile: {
+            age: { $gte: 18 },
+            $not: { country: "UK" },
+          },
+        });
+        expect(query(usAdult)).toBe(true);
+        expect(query(usMinor)).toBe(false); // age fails
+        expect(query(ukAdult)).toBe(false); // $not fails
+      });
+    });
+
+    describe("$where alone on a nested object (no field siblings)", () => {
+      it("runs the $where on the nested value", () => {
+        const query = match<User>({
+          profile: {
+            $where: (p) => p.country === "US",
+          },
+        });
+        expect(query(usAdult)).toBe(true);
+        expect(query(ukAdult)).toBe(false);
+      });
+    });
+
+    describe("doubly nested mix", () => {
+      interface Org {
+        team: {
+          lead: {
+            age: number;
+            country: string;
+          };
+        };
+      }
+
+      it("mixed operator + field two levels deep", () => {
+        const query = match<Org>({
+          team: {
+            lead: {
+              age: { $gte: 18 },
+              $where: (l) => l.country === "US",
+            },
+          },
+        });
+        expect(
+          query({ team: { lead: { age: 30, country: "US" } } }),
+        ).toBe(true);
+        expect(
+          query({ team: { lead: { age: 12, country: "US" } } }),
+        ).toBe(false);
+        expect(
+          query({ team: { lead: { age: 30, country: "UK" } } }),
+        ).toBe(false);
+      });
+    });
+
+    describe("non-plain-object field queries", () => {
+      // Guard against regressions where Date / RegExp / empty {} field
+      // queries silently always pass. These were originally caught
+      // implicitly by the old recursion path's typeof-object check.
+
+      it("Date instance as field query fails when values differ", () => {
+        interface E {
+          at: Date | number;
+        }
+        const dateA = new Date("2020-01-01");
+        const q = match<E>({ at: dateA });
+        expect(q({ at: dateA })).toBe(true);
+        expect(q({ at: new Date("2020-01-02") })).toBe(false);
+        expect(q({ at: 1 })).toBe(false); // value isn't a Date
+      });
+
+      it("RegExp instance as field query fails when string doesn't match", () => {
+        const q = match<{ name: string }>({ name: /^foo/ });
+        expect(q({ name: "foobar" })).toBe(true);
+        expect(q({ name: "barfoo" })).toBe(false);
+      });
+
+      it("empty {} field query fails on null fieldValue", () => {
+        interface E {
+          profile: { age: number } | null;
+        }
+        const q = match<E>({ profile: {} as never });
+        expect(q({ profile: { age: 30 } })).toBe(true);
+        expect(q({ profile: null })).toBe(false);
+      });
+
+      it("empty {} field query fails on primitive fieldValue", () => {
+        const q = match({ profile: {} } as never) as (i: unknown) => boolean;
+        expect(q({ profile: 1 })).toBe(false);
+        expect(q({ profile: "x" })).toBe(false);
+      });
+    });
+
+    describe("$exists alongside sibling field keys", () => {
+      interface Maybe {
+        profile: { age: number } | null;
+      }
+      const present: Maybe = { profile: { age: 30 } };
+      const missing: Maybe = { profile: null };
+
+      it("$exists: true + field key still enforces field key", () => {
+        const query = match<Maybe>({
+          profile: {
+            $exists: true,
+            age: { $gte: 18 },
+          },
+        });
+        expect(query(present)).toBe(true);
+        expect(query(missing)).toBe(false); // $exists fails first
+        expect(
+          query({ profile: { age: 12 } }),
+        ).toBe(false); // age fails
+      });
+    });
+  });
 });
