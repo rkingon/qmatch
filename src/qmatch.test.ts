@@ -1621,6 +1621,60 @@ describe("explain", () => {
           query({ team: { lead: { age: 30, country: "UK" } } }),
         ).toBe(false);
       });
+
+      it("key order independent at depth >= 2", () => {
+        const whereFirst = match<Org>({
+          team: {
+            lead: {
+              $where: (l) => l.country === "US",
+              age: { $gte: 18 },
+            },
+          },
+        });
+        const fieldFirst = match<Org>({
+          team: {
+            lead: {
+              age: { $gte: 18 },
+              $where: (l) => l.country === "US",
+            },
+          },
+        });
+        const cases: Org[] = [
+          { team: { lead: { age: 30, country: "US" } } },
+          { team: { lead: { age: 12, country: "US" } } },
+          { team: { lead: { age: 30, country: "UK" } } },
+        ];
+        for (const c of cases) {
+          expect(whereFirst(c)).toBe(fieldFirst(c));
+        }
+      });
+    });
+
+    describe("leaf operators alongside sibling field keys on the same path", () => {
+      interface User {
+        profile: {
+          age: number;
+          country: string;
+        };
+      }
+
+      // Note: this exercises an edge case — the partition routes
+      // { age: { $gte, $lte }, country: "US" } correctly, but
+      // { $gte: 18, country: "US" } at the profile level would route
+      // $gte to matchOperators against the profile object itself
+      // (cryptic failure). The well-typed shape is the former.
+      it("range op on a child field combined with sibling field check", () => {
+        const q = match<User>({
+          profile: {
+            age: { $gte: 18, $lte: 65 },
+            country: "US",
+          },
+        });
+        expect(q({ profile: { age: 30, country: "US" } })).toBe(true);
+        expect(q({ profile: { age: 12, country: "US" } })).toBe(false);
+        expect(q({ profile: { age: 70, country: "US" } })).toBe(false);
+        expect(q({ profile: { age: 30, country: "UK" } })).toBe(false);
+      });
     });
 
     describe("non-plain-object field queries", () => {
