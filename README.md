@@ -46,6 +46,11 @@ import { match } from 'qmatch';
 // Simple equality (implicit $eq)
 const isActive = match<User>({ status: 'active' });
 
+// Date and RegExp instances are also implicit shorthand —
+// `{ at: dateA }` is `$eq` by timestamp; `{ name: /^A/ }` is `$regex`.
+const releasedToday = match<Event>({ releasedAt: new Date('2025-01-01') });
+const startsWithA = match<User>({ name: /^A/ });
+
 // Comparison operators
 const adults = match<User>({ age: { $gte: 18 } });
 

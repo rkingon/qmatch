@@ -156,7 +156,9 @@ export interface Matcher<T> {
 // Operator Keys (for detection)
 // =============================================================================
 
-const OPERATOR_KEYS = new Set([
+// Leaf operators apply to a single value (primitive, Date, or array). They are
+// handled by matchOperators against the field value directly.
+const LEAF_OPERATOR_KEYS = new Set([
   "$eq",
   "$ne",
   "$gt",
@@ -172,10 +174,15 @@ const OPERATOR_KEYS = new Set([
   "$fn",
   "$some",
   "$every",
-  "$and",
-  "$or",
-  "$not",
-  "$where",
+]);
+
+// Logical operators combine queries against an object/item. They are handled by
+// matchQueryInternal and can legitimately appear alongside sibling field keys.
+const LOGICAL_OPERATOR_KEYS = new Set(["$and", "$or", "$not", "$where"]);
+
+const OPERATOR_KEYS = new Set([
+  ...LEAF_OPERATOR_KEYS,
+  ...LOGICAL_OPERATOR_KEYS,
 ]);
 
 // =============================================================================
@@ -575,7 +582,8 @@ function matchQueryInternal<T extends object>(
 
   // Handle field queries (implicit AND)
   for (const key of Object.keys(query)) {
-    // Skip logical operators
+    // Skip operator keys; they're handled above ($and/$or/$not/$where) or
+    // per-field below (leaf operators get split out into matchOperators).
     if (OPERATOR_KEYS.has(key)) continue;
 
     const fieldPath = path ? `${path}.${key}` : key;
@@ -584,42 +592,79 @@ function matchQueryInternal<T extends object>(
 
     // Handle nested object queries vs operator queries
     if (fieldQuery !== null && typeof fieldQuery === "object") {
-      if (isOperatorObject(fieldQuery)) {
-        // It's an operator object - match against operators
-        const result = matchOperators(
-          fieldValue,
-          fieldQuery as PrimitiveOperators<unknown>,
-          fieldPath,
-        );
-        if (!result.matched) return result;
-      } else if (!Array.isArray(fieldQuery)) {
-        // It's a nested object query - recurse
-        // First check if the field value exists and is an object
-        if (fieldValue === null || fieldValue === undefined) {
-          // Check if the nested query is just checking $exists: false
-          if (
-            typeof fieldQuery === "object" &&
-            "$exists" in fieldQuery &&
-            (fieldQuery as Record<string, unknown>).$exists === false
-          ) {
-            // null/undefined passes $exists: false
-            continue;
-          }
-          return fail(fieldPath, "nested", "object", fieldValue);
-        }
-        if (typeof fieldValue !== "object") {
-          return fail(fieldPath, "nested", "object", typeof fieldValue);
-        }
-        const result = matchQueryInternal(
-          fieldValue as Record<string, unknown>,
-          fieldQuery as Query<Record<string, unknown>>,
-          fieldPath,
-        );
-        if (!result.matched) return result;
-      } else {
+      if (Array.isArray(fieldQuery)) {
         // Array - direct equality comparison
         if (!arraysEqual(fieldValue as unknown[], fieldQuery)) {
           return fail(fieldPath, "$eq (array)", fieldQuery, fieldValue);
+        }
+      } else if (fieldQuery instanceof Date) {
+        // Date instance - implicit $eq by timestamp
+        if (
+          !(fieldValue instanceof Date) ||
+          fieldValue.getTime() !== fieldQuery.getTime()
+        ) {
+          return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
+        }
+      } else if (fieldQuery instanceof RegExp) {
+        // RegExp instance - implicit $regex against a string field
+        if (typeof fieldValue !== "string" || !fieldQuery.test(fieldValue)) {
+          return fail(
+            fieldPath,
+            "$regex (implicit)",
+            fieldQuery.toString(),
+            fieldValue,
+          );
+        }
+      } else {
+        // Plain object query: split into leaf operators (applied to the
+        // field value directly) and the rest (sibling field keys + logical
+        // operators, applied by recursing into matchQueryInternal). This
+        // lets a single nested object query mix e.g. { $gte: 18 } on age
+        // with a sibling { $where } without silently dropping either piece.
+        const fq = fieldQuery as Record<string, unknown>;
+        const leafOps: Record<string, unknown> = {};
+        const restQuery: Record<string, unknown> = {};
+        let hasLeafOps = false;
+        let hasRest = false;
+        for (const k of Object.keys(fq)) {
+          if (LEAF_OPERATOR_KEYS.has(k)) {
+            leafOps[k] = fq[k];
+            hasLeafOps = true;
+          } else {
+            restQuery[k] = fq[k];
+            hasRest = true;
+          }
+        }
+
+        if (hasLeafOps) {
+          const result = matchOperators(
+            fieldValue,
+            leafOps as PrimitiveOperators<unknown>,
+            fieldPath,
+          );
+          if (!result.matched) return result;
+        }
+
+        // For everything except a pure leaf-op query, the field value must
+        // be a non-null object (sibling field keys and logical operators
+        // are object-shaped, and an empty {} query still expects an object
+        // — consistent with Mongo semantics for { field: {} }).
+        if (hasRest || !hasLeafOps) {
+          if (fieldValue === null || fieldValue === undefined) {
+            return fail(fieldPath, "nested", "object", fieldValue);
+          }
+          if (typeof fieldValue !== "object") {
+            return fail(fieldPath, "nested", "object", typeof fieldValue);
+          }
+        }
+
+        if (hasRest) {
+          const result = matchQueryInternal(
+            fieldValue as Record<string, unknown>,
+            restQuery as Query<Record<string, unknown>>,
+            fieldPath,
+          );
+          if (!result.matched) return result;
         }
       }
     } else {
