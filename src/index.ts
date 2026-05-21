@@ -224,10 +224,19 @@ function hasToNumber(
 }
 
 function toNumber(value: unknown): number | null {
-  if (typeof value === "number") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") {
+    // Coerce numeric strings (e.g. "1000", "1.5", "-2", "1e5") so that
+    // values arriving from APIs/forms still work with $gt/$gte/$lt/$lte.
+    // Empty/whitespace-only and non-finite strings ("", "abc", "Infinity")
+    // return null and fall through to a normal mismatch.
+    if (value.trim() === "") return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
   if (hasToNumber(value)) {
     const n = value.toNumber();
-    return typeof n === "number" ? n : null;
+    return typeof n === "number" && Number.isFinite(n) ? n : null;
   }
   return null;
 }
