@@ -1,5 +1,11 @@
 # qmatch
 
+## 1.3.0
+
+### Minor Changes
+
+- [#8](https://github.com/rkingon/qmatch/pull/8) [`83306f1`](https://github.com/rkingon/qmatch/commit/83306f1a87f82ce4e643f3092cecef2e0e27f057) Thanks [@rkingon](https://github.com/rkingon)! - Coerce numeric strings for `$gt`/`$gte`/`$lt`/`$lte`. Values like `"1000"`, `"1.5"`, `"-2"`, and `"1e5"` are now parsed via `Number()` so comparisons work against data arriving from APIs or form inputs without an upstream cast. Previously these silently failed: the type system disallowed `$gt` on `string`, but a runtime value typed as `number | string` (or `any`/`unknown`) would slip through and always return `false` with no error. Non-numeric or empty strings (`"abc"`, `""`, `"1,000"`) still do not coerce — they fail the comparison as before. Equality operators (`$eq`/`$ne`/`$in`/`$nin`) are unchanged and remain strict.
+
 ## 1.2.1
 
 ### Patch Changes
