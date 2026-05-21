@@ -46,12 +46,27 @@ type CustomOperator<T> = {
 };
 
 /**
+ * $size accepts either an exact length, or a comparison operator object
+ * applied to the array's length (so you can ask for length > N, ranges, etc.)
+ */
+type SizeOperators = {
+  $eq?: number;
+  $ne?: number;
+  $gt?: number;
+  $gte?: number;
+  $lt?: number;
+  $lte?: number;
+  $in?: number[];
+  $nin?: number[];
+};
+
+/**
  * Array operators - only for array fields
  */
 type ArrayOperators<T> = T extends (infer U)[]
   ? {
       $contains?: U;
-      $size?: number;
+      $size?: number | SizeOperators;
       $some?: [IsPlainObject<NonNullable<U>>] extends [true]
         ? Query<NonNullable<U>>
         : PrimitiveOperators<U>;
@@ -407,13 +422,31 @@ function matchOperators<T>(
     }
   }
 
-  // $size - array length
+  // $size - array length. Accepts either an exact number (matches
+  // value.length === N) or a comparison object like { $gt: 3, $lte: 10 }
+  // applied to the length.
   if ("$size" in ops) {
     if (!Array.isArray(value)) {
       return fail(path, "$size", "array", typeof value);
     }
-    if (value.length !== ops.$size) {
-      return fail(path, "$size", ops.$size, value.length);
+    const sizeQuery = ops.$size;
+    if (typeof sizeQuery === "number") {
+      if (value.length !== sizeQuery) {
+        return fail(path, "$size", sizeQuery, value.length);
+      }
+    } else if (
+      sizeQuery !== null &&
+      typeof sizeQuery === "object" &&
+      !Array.isArray(sizeQuery)
+    ) {
+      const result = matchOperators(
+        value.length,
+        sizeQuery as PrimitiveOperators<number>,
+        `${path}.$size`,
+      );
+      if (!result.matched) return result;
+    } else {
+      return fail(path, "$size", "number or operator object", typeof sizeQuery);
     }
   }
 

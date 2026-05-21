@@ -693,6 +693,74 @@ describe("match", () => {
       });
       expect(rockWithThreeGenres(radiohead)).toBe(true);
     });
+
+    it("matches length with $gt", () => {
+      const moreThanTwo = match<Artist>({
+        genres: { $size: { $gt: 2 } },
+      });
+      expect(moreThanTwo(radiohead)).toBe(true); // length 3
+      const moreThanFive = match<Artist>({
+        genres: { $size: { $gt: 5 } },
+      });
+      expect(moreThanFive(radiohead)).toBe(false);
+    });
+
+    it("matches length with $gte / $lte range", () => {
+      const oneToThree = match<Artist>({
+        genres: { $size: { $gte: 1, $lte: 3 } },
+      });
+      expect(oneToThree(radiohead)).toBe(true);
+      const fourPlus = match<Artist>({
+        genres: { $size: { $gte: 4 } },
+      });
+      expect(fourPlus(radiohead)).toBe(false);
+    });
+
+    it("matches length with $lt", () => {
+      const fewerThanFour = match<Artist>({
+        genres: { $size: { $lt: 4 } },
+      });
+      expect(fewerThanFour(radiohead)).toBe(true);
+      const fewerThanTwo = match<Artist>({
+        genres: { $size: { $lt: 2 } },
+      });
+      expect(fewerThanTwo(radiohead)).toBe(false);
+    });
+
+    it("matches length with $ne", () => {
+      const notEmpty = match<Artist>({
+        genres: { $size: { $ne: 0 } },
+      });
+      expect(notEmpty(radiohead)).toBe(true);
+    });
+
+    it("matches length with $in", () => {
+      const oneOfThese = match<Artist>({
+        genres: { $size: { $in: [1, 3, 5] } },
+      });
+      expect(oneOfThese(radiohead)).toBe(true);
+      const notInList = match<Artist>({
+        genres: { $size: { $in: [1, 2, 4] } },
+      });
+      expect(notInList(radiohead)).toBe(false);
+    });
+
+    it("combines $size operator object with other array operators", () => {
+      const rockAndManyGenres = match<Artist>({
+        genres: { $contains: "rock", $size: { $gte: 2 } },
+      });
+      expect(rockAndManyGenres(radiohead)).toBe(true);
+    });
+
+    it("explains $size comparison failure", () => {
+      const result = explain<Artist>(
+        { genres: { $size: { $gt: 10 } } },
+        radiohead,
+      );
+      expect(result.matched).toBe(false);
+      expect(result.failure?.path).toBe("genres.$size");
+      expect(result.failure?.operator).toBe("$gt");
+    });
   });
 
   describe("$regex operator", () => {
