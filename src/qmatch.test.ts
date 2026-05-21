@@ -266,12 +266,33 @@ describe("match", () => {
         ).toBe(false);
       });
 
-      it("does NOT coerce plain strings", () => {
-        expect(
-          match<{ price: number | string }>({ price: { $gte: 20 } })({
-            price: "25",
-          }),
-        ).toBe(false);
+      it("coerces numeric strings for $gt/$gte/$lt/$lte", () => {
+        const check = match<{ price: number | string }>({
+          price: { $gte: 20 },
+        });
+        expect(check({ price: "25" })).toBe(true);
+        expect(check({ price: "15" })).toBe(false);
+        expect(check({ price: "20" })).toBe(true);
+      });
+
+      it("handles negative, decimal, and exponent string forms", () => {
+        const check = match<{ price: number | string }>({
+          price: { $gt: -10, $lt: 1_000_000 },
+        });
+        expect(check({ price: "-5" })).toBe(true);
+        expect(check({ price: "1.5" })).toBe(true);
+        expect(check({ price: "1e5" })).toBe(true);
+        expect(check({ price: "-20" })).toBe(false);
+      });
+
+      it("does NOT coerce non-numeric or empty strings", () => {
+        const check = match<{ price: number | string }>({
+          price: { $gte: 0 },
+        });
+        expect(check({ price: "abc" })).toBe(false);
+        expect(check({ price: "" })).toBe(false);
+        expect(check({ price: "   " })).toBe(false);
+        expect(check({ price: "1,000" })).toBe(false); // no locale parsing
       });
 
       it("does NOT coerce if .toNumber() returns non-number", () => {

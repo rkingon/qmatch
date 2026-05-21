@@ -161,6 +161,8 @@ match<Event>({
 });
 ```
 
+Numeric strings (e.g. `"1000"`, `"1.5"`, `"-2"`, `"1e5"`) are coerced via `Number()` so values arriving from APIs or form inputs still compare correctly. Non-numeric or empty strings (`"abc"`, `""`, `"1,000"`) do not coerce and the comparison fails. Objects with a `.toNumber()` method (e.g. Prisma `Decimal`) are also supported.
+
 ### Equality (all types)
 
 | Operator | Description |
