@@ -745,6 +745,24 @@ describe("match", () => {
       expect(notInList(radiohead)).toBe(false);
     });
 
+    it("matches length with $nin", () => {
+      const notOneOfThese = match<Artist>({
+        genres: { $size: { $nin: [1, 2, 4] } },
+      });
+      expect(notOneOfThese(radiohead)).toBe(true);
+      const excluded = match<Artist>({
+        genres: { $size: { $nin: [3] } },
+      });
+      expect(excluded(radiohead)).toBe(false);
+    });
+
+    it("composes equality + comparison in the size object", () => {
+      const m = match<Artist>({
+        genres: { $size: { $gte: 3, $nin: [4, 5] } },
+      });
+      expect(m(radiohead)).toBe(true);
+    });
+
     it("combines $size operator object with other array operators", () => {
       const rockAndManyGenres = match<Artist>({
         genres: { $contains: "rock", $size: { $gte: 2 } },
@@ -752,14 +770,51 @@ describe("match", () => {
       expect(rockAndManyGenres(radiohead)).toBe(true);
     });
 
-    it("explains $size comparison failure", () => {
+    it("rejects an empty $size operator object", () => {
+      // Empty objects must NOT silently match — that would re-introduce
+      // the silent-fail bug class from #7/#8.
+      const m = match<Artist>({
+        genres: { $size: {} as { $gt?: number } },
+      });
+      expect(m(radiohead)).toBe(false);
       const result = explain<Artist>(
-        { genres: { $size: { $gt: 10 } } },
+        { genres: { $size: {} as { $gt?: number } } },
         radiohead,
       );
-      expect(result.matched).toBe(false);
-      expect(result.failure?.path).toBe("genres.$size");
-      expect(result.failure?.operator).toBe("$gt");
+      expect(result.failure?.path).toBe("genres");
+      expect(result.failure?.operator).toBe("$size");
+    });
+
+    it("rejects unknown sub-operators inside $size", () => {
+      // $exists/$regex/$fn/$contains are meaningless on a length and must
+      // fail explicitly when smuggled in via `any`/`unknown` callers.
+      const cases: unknown[] = [
+        { $exists: true },
+        { $regex: /\d/ },
+        { $fn: () => true },
+        { $contains: 1 },
+      ];
+      for (const sub of cases) {
+        const result = explain<Artist>(
+          { genres: { $size: sub as { $gt?: number } } },
+          radiohead,
+        );
+        expect(result.matched).toBe(false);
+        expect(result.failure?.path).toBe("genres.$size");
+      }
+    });
+
+    it("rejects malformed $size shapes (null, array, string)", () => {
+      const bad: unknown[] = [null, [], "3"];
+      for (const v of bad) {
+        const result = explain<Artist>(
+          { genres: { $size: v as number } },
+          radiohead,
+        );
+        expect(result.matched).toBe(false);
+        expect(result.failure?.path).toBe("genres");
+        expect(result.failure?.operator).toBe("$size");
+      }
     });
   });
 
@@ -1262,6 +1317,18 @@ describe("explain", () => {
       expect(result.failure?.path).toBe("genres");
       expect(result.failure?.operator).toBe("$size");
       expect(result.failure?.expected).toBe(5);
+      expect(result.failure?.actual).toBe(3);
+    });
+
+    it("explains $size comparison-object failure", () => {
+      const result = explain<Artist>(
+        { genres: { $size: { $gt: 10 } } },
+        radiohead,
+      );
+      expect(result.matched).toBe(false);
+      expect(result.failure?.path).toBe("genres.$size");
+      expect(result.failure?.operator).toBe("$gt");
+      expect(result.failure?.expected).toBe("> 10");
       expect(result.failure?.actual).toBe(3);
     });
   });

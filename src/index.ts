@@ -47,18 +47,11 @@ type CustomOperator<T> = {
 
 /**
  * $size accepts either an exact length, or a comparison operator object
- * applied to the array's length (so you can ask for length > N, ranges, etc.)
+ * applied to the array's length. Only equality + numeric comparison ops
+ * make sense for a length (no $exists/$regex/$fn/$contains/etc.), so we
+ * compose the two existing aliases rather than redeclare them.
  */
-type SizeOperators = {
-  $eq?: number;
-  $ne?: number;
-  $gt?: number;
-  $gte?: number;
-  $lt?: number;
-  $lte?: number;
-  $in?: number[];
-  $nin?: number[];
-};
+type SizeOperators = EqualityOperators<number> & ComparableOperators<number>;
 
 /**
  * Array operators - only for array fields
@@ -194,6 +187,19 @@ const LEAF_OPERATOR_KEYS = new Set([
 // Logical operators combine queries against an object/item. They are handled by
 // matchQueryInternal and can legitimately appear alongside sibling field keys.
 const LOGICAL_OPERATOR_KEYS = new Set(["$and", "$or", "$not", "$where"]);
+
+// Sub-operators allowed inside { $size: { ... } }. Anything else (or an empty
+// object) is rejected so we don't silently match like the bugs fixed in #7/#8.
+const SIZE_SUB_OPERATOR_KEYS = new Set([
+  "$eq",
+  "$ne",
+  "$gt",
+  "$gte",
+  "$lt",
+  "$lte",
+  "$in",
+  "$nin",
+]);
 
 const OPERATOR_KEYS = new Set([
   ...LEAF_OPERATOR_KEYS,
@@ -424,7 +430,9 @@ function matchOperators<T>(
 
   // $size - array length. Accepts either an exact number (matches
   // value.length === N) or a comparison object like { $gt: 3, $lte: 10 }
-  // applied to the length.
+  // applied to the length. Empty objects and unknown sub-operators are
+  // rejected — silently passing them would reintroduce the #7/#8 bug
+  // class (operators slipping through with no error).
   if ("$size" in ops) {
     if (!Array.isArray(value)) {
       return fail(path, "$size", "array", typeof value);
@@ -439,6 +447,24 @@ function matchOperators<T>(
       typeof sizeQuery === "object" &&
       !Array.isArray(sizeQuery)
     ) {
+      const subKeys = Object.keys(sizeQuery as Record<string, unknown>);
+      if (subKeys.length === 0) {
+        return fail(
+          path,
+          "$size",
+          "non-empty operator object",
+          sizeQuery,
+        );
+      }
+      const unknown = subKeys.find((k) => !SIZE_SUB_OPERATOR_KEYS.has(k));
+      if (unknown !== undefined) {
+        return fail(
+          `${path}.$size`,
+          unknown,
+          `one of ${[...SIZE_SUB_OPERATOR_KEYS].join(", ")}`,
+          unknown,
+        );
+      }
       const result = matchOperators(
         value.length,
         sizeQuery as PrimitiveOperators<number>,
