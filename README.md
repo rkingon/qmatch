@@ -196,7 +196,7 @@ match<User>({
 | Operator | Description |
 |----------|-------------|
 | `$contains` | Array includes value |
-| `$size` | Array length equals |
+| `$size` | Array length — exact number, or comparison object (`$gt`/`$gte`/`$lt`/`$lte`/`$eq`/`$ne`/`$in`/`$nin`) |
 | `$some` | At least one element matches |
 | `$every` | All elements match |
 
@@ -204,6 +204,11 @@ match<User>({
 match<Artist>({
   genres: { $contains: 'rock', $size: 3 },
 });
+
+// $size also accepts comparison operators against the length
+match<Artist>({ genres: { $size: { $gt: 2 } } });             // more than 2
+match<Artist>({ genres: { $size: { $gte: 1, $lte: 5 } } });   // between 1 and 5
+match<Artist>({ genres: { $size: { $ne: 0 } } });             // non-empty
 
 // $some — at least one element matches the sub-query
 match<Artist>({
