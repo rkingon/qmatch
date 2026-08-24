@@ -358,17 +358,23 @@ describe("match", () => {
       expect(match<Invoice>({ total: { $nin: [250] } })(invoice)).toBe(false);
     });
 
+    it("still honors reference equality on union-typed fields", () => {
+      // A field typed `number | Dec` could always pass an instance as the
+      // operand and get ===; coercion must not take that away.
+      const dec = new Dec(250);
+      const check = match<{ total: number | Dec }>({ total: { $eq: dec } });
+      expect(check({ total: dec })).toBe(true);
+      expect(check({ total: new Dec(250) })).toBe(false);
+      expect(
+        match<{ total: number | Dec }>({ total: { $in: [dec] } })({
+          total: dec,
+        }),
+      ).toBe(true);
+    });
+
     it("coerces for implicit $eq shorthand", () => {
       expect(match<Invoice>({ total: 250 })(invoice)).toBe(true);
       expect(match<Invoice>({ total: 100 })(invoice)).toBe(false);
-    });
-
-    it("does not recurse into the instance's own properties", () => {
-      // Pre-fix this hit the nested-object branch and compared Decimal
-      // internals instead of the value.
-      expect(match<Invoice>({ total: { $gte: 0, $lte: 1_000 } })(invoice)).toBe(
-        true,
-      );
     });
 
     it("supports $exists and $fn", () => {

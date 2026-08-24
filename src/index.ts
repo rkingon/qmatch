@@ -292,10 +292,13 @@ function toNumber(value: unknown): number | null {
 
 /**
  * Equality against a plain-number operand for `toNumber`-able values (e.g.
- * `Decimal`). Values that don't coerce never match, so callers fall through to
- * a normal mismatch rather than throwing.
+ * `Decimal`). Reference equality is tried first so an operand that is itself a
+ * `Decimal` keeps the pre-coercion behavior it had on union-typed fields.
+ * Values that don't coerce never match, so callers fall through to a normal
+ * mismatch rather than throwing.
  */
 function toNumberEquals(value: unknown, expected: unknown): boolean {
+  if (value === expected) return true;
   const n = toNumber(value);
   return n !== null && n === expected;
 }
@@ -895,7 +898,12 @@ function formatValue(value: unknown): string {
     return `[${value.map(formatValue).join(", ")}]`;
   }
   if (typeof value === "string") return `"${value}"`;
-  if (hasToNumber(value)) return String(value);
+  if (hasToNumber(value)) {
+    // Render what we actually compared, not the instance — String() on a bare
+    // { toNumber } gives "[object Object]".
+    const n = toNumber(value);
+    if (n !== null) return String(n);
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
