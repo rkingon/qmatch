@@ -208,6 +208,8 @@ match<Invoice>({ total: { $fn: (d) => d.gte('9007199254740993') } });
 
 A `.toNumber()` that returns a non-finite number (or a non-number) never matches, so the field falls through to a normal mismatch rather than throwing.
 
+> **The match is structural, not `Decimal`-specific.** Any type with a `toNumber(): number` method is treated as a number field, so its other properties are no longer queryable as a nested object. If you have a richer domain object — say `Money { amount, currency, toNumber() }` — `{ price: { currency: 'USD' } }` will not typecheck; query the numeric value directly, or drop `toNumber` from the type. This changed in v2.
+
 ### String
 
 | Operator | Description |

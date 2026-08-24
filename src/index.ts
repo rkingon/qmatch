@@ -730,6 +730,15 @@ function matchQueryInternal<T extends object>(
         ) {
           return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
         }
+      } else if (hasToNumber(fieldQuery)) {
+        // Decimal used as the query value - implicit $eq by number, mirroring
+        // the Date branch above. Without this it falls into the plain-object
+        // split below, where a class instance (methods on the prototype, so
+        // Object.keys is empty) yields neither leaf ops nor rest and matches
+        // anything that happens to be an object.
+        if (!toNumberEquals(fieldValue, toNumber(fieldQuery))) {
+          return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
+        }
       } else if (fieldQuery instanceof RegExp) {
         // RegExp instance - implicit $regex against a string field
         if (typeof fieldValue !== "string" || !fieldQuery.test(fieldValue)) {

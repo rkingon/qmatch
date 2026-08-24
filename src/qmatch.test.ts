@@ -377,6 +377,14 @@ describe("match", () => {
       expect(match<Invoice>({ total: 100 })(invoice)).toBe(false);
     });
 
+    it("treats a Decimal used as the query value as implicit $eq", () => {
+      // Class methods live on the prototype, so Object.keys(new Dec(250)) is
+      // empty. Without an explicit branch this fell through to the nested
+      // split and vacuously matched any object.
+      expect(match<Invoice>({ total: new Dec(250) })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: new Dec(100) })(invoice)).toBe(false);
+    });
+
     it("supports $exists and $fn", () => {
       expect(match<Invoice>({ discount: { $exists: false } })(invoice)).toBe(
         true,
