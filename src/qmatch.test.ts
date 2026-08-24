@@ -313,6 +313,101 @@ describe("match", () => {
     });
   });
 
+  describe("Decimal-typed fields", () => {
+    // Stand-in for a Prisma / decimal.js Decimal: a class instance that is not
+    // a number but knows how to become one. Matched structurally by the lib.
+    class Dec {
+      constructor(private readonly n: number) {}
+      toNumber() {
+        return this.n;
+      }
+      toString() {
+        return String(this.n);
+      }
+    }
+
+    interface Invoice {
+      total: Dec;
+      discount: Dec | null;
+    }
+
+    const invoice: Invoice = { total: new Dec(250), discount: null };
+
+    it("takes plain-number operands for comparison", () => {
+      expect(match<Invoice>({ total: { $gte: 250 } })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: { $gt: 250 } })(invoice)).toBe(false);
+      expect(match<Invoice>({ total: { $lt: 251 } })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: { $lte: 249 } })(invoice)).toBe(false);
+    });
+
+    it("coerces for $eq / $ne", () => {
+      expect(match<Invoice>({ total: { $eq: 250 } })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: { $eq: 100 } })(invoice)).toBe(false);
+      expect(match<Invoice>({ total: { $ne: 100 } })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: { $ne: 250 } })(invoice)).toBe(false);
+    });
+
+    it("coerces for $in / $nin", () => {
+      expect(match<Invoice>({ total: { $in: [100, 250] } })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: { $in: [100, 200] } })(invoice)).toBe(
+        false,
+      );
+      expect(match<Invoice>({ total: { $nin: [100, 200] } })(invoice)).toBe(
+        true,
+      );
+      expect(match<Invoice>({ total: { $nin: [250] } })(invoice)).toBe(false);
+    });
+
+    it("coerces for implicit $eq shorthand", () => {
+      expect(match<Invoice>({ total: 250 })(invoice)).toBe(true);
+      expect(match<Invoice>({ total: 100 })(invoice)).toBe(false);
+    });
+
+    it("does not recurse into the instance's own properties", () => {
+      // Pre-fix this hit the nested-object branch and compared Decimal
+      // internals instead of the value.
+      expect(match<Invoice>({ total: { $gte: 0, $lte: 1_000 } })(invoice)).toBe(
+        true,
+      );
+    });
+
+    it("supports $exists and $fn", () => {
+      expect(match<Invoice>({ discount: { $exists: false } })(invoice)).toBe(
+        true,
+      );
+      expect(
+        match<Invoice>({ total: { $fn: (d) => d.toNumber() % 50 === 0 } })(
+          invoice,
+        ),
+      ).toBe(true);
+    });
+
+    it("handles nullable Decimal fields", () => {
+      expect(match<Invoice>({ discount: { $eq: null } })(invoice)).toBe(true);
+      expect(match<Invoice>({ discount: { $gte: 0 } })(invoice)).toBe(false);
+      const discounted: Invoice = { total: new Dec(250), discount: new Dec(10) };
+      expect(match<Invoice>({ discount: { $gte: 10 } })(discounted)).toBe(true);
+      expect(match<Invoice>({ discount: { $eq: null } })(discounted)).toBe(
+        false,
+      );
+    });
+
+    it("fails when .toNumber() does not yield a finite number", () => {
+      const broken = { total: new Dec(NaN), discount: null };
+      expect(match<Invoice>({ total: { $eq: 0 } })(broken)).toBe(false);
+      expect(match<Invoice>({ total: { $gte: 0 } })(broken)).toBe(false);
+      // $ne is satisfied precisely because the value never equals anything
+      expect(match<Invoice>({ total: { $ne: 0 } })(broken)).toBe(true);
+    });
+
+    it("formats the value readably in explain()", () => {
+      const result = match<Invoice>({ total: { $gte: 500 } }).explain(invoice);
+      expect(result.failure?.message).toBe(
+        "total: $gte expected \">= 500\", got 250",
+      );
+    });
+  });
+
   describe("$in operator", () => {
     it("matches value in array", () => {
       const rockOrElectronic = match<Song>({
