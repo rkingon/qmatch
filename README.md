@@ -145,7 +145,7 @@ const qualified = match<Lead>({
 
 ## Operators
 
-### Comparison (number | Date)
+### Comparison (number | Date | Decimal)
 
 | Operator | Description |
 |----------|-------------|
@@ -161,7 +161,7 @@ match<Event>({
 });
 ```
 
-Numeric strings (e.g. `"1000"`, `"1.5"`, `"-2"`, `"1e5"`) are coerced via `Number()` so values arriving from APIs or form inputs still compare correctly. Non-numeric or empty strings (`"abc"`, `""`, `"1,000"`) do not coerce and the comparison fails. Objects with a `.toNumber()` method (e.g. Prisma `Decimal`) are also supported.
+Numeric strings (e.g. `"1000"`, `"1.5"`, `"-2"`, `"1e5"`) are coerced via `Number()` so values arriving from APIs or form inputs still compare correctly. Non-numeric or empty strings (`"abc"`, `""`, `"1,000"`) do not coerce and the comparison fails.
 
 ### Equality (all types)
 
@@ -178,6 +178,37 @@ match<User>({
   status: { $ne: 'banned' },
 });
 ```
+
+### Decimal fields
+
+Any value with a `.toNumber(): number` method — Prisma `Decimal`, decimal.js, big.js — is treated as a number field. You query it with plain numbers; the value is coerced, the operand never is.
+
+```typescript
+import { Decimal } from 'decimal.js';
+
+interface Invoice {
+  total: Decimal;
+  discount: Decimal | null;
+}
+
+match<Invoice>({
+  total: { $gte: 10_000, $lt: 50_000 },  // comparison
+  discount: { $exists: false },
+});
+
+match<Invoice>({ total: { $in: [99, 199, 299] } });  // equality
+match<Invoice>({ total: 250 });                      // implicit $eq
+```
+
+Because comparison goes through `Number()`, values beyond `Number.MAX_SAFE_INTEGER` lose precision. Reach for `$fn` when you need the library's own comparison:
+
+```typescript
+match<Invoice>({ total: { $fn: (d) => d.gte('9007199254740993') } });
+```
+
+A `.toNumber()` that returns a non-finite number (or a non-number) never matches, so the field falls through to a normal mismatch rather than throwing.
+
+> **The match is structural, not `Decimal`-specific.** Any type with a `toNumber(): number` method is treated as a number field, so its other properties are no longer queryable as a nested object. If you have a richer domain object — say `Money { amount, currency, toNumber() }` — `{ price: { currency: 'USD' } }` will not typecheck; query the numeric value directly, or drop `toNumber` from the type. This changed in v2.
 
 ### String
 
@@ -371,6 +402,7 @@ function filterUsers(users: User[], matcher: Matcher<User>): User[] {
 | Comparison on null | Returns false |
 | `$every` on empty array | Matches (vacuous truth) |
 | `$some` on empty array | Does not match |
+| `.toNumber()` returns `NaN`/non-number | No operator matches (`$ne` succeeds) |
 
 ## Contributing
 

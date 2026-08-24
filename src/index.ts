@@ -8,10 +8,36 @@
 // =============================================================================
 
 /**
- * Comparison operators - only available for number | Date
+ * Values that are not `number` but can produce one on demand — e.g. Prisma /
+ * decimal.js `Decimal`. Matched structurally so consumers never have to import
+ * a type from us, or us from them.
  */
-type ComparableOperators<T> = T extends number | Date
-  ? { $gt?: T; $gte?: T; $lt?: T; $lte?: T }
+type HasToNumber = { toNumber: () => number };
+
+/**
+ * The operand type for a field. `toNumber`-able fields are always queried with
+ * a plain number (we coerce the value, never the operand), so a `Decimal` field
+ * takes `{ $gte: 700 }` rather than `{ $gte: new Decimal(700) }`. Nullability is
+ * carried through so `Decimal | null` still accepts `{ $eq: null }`.
+ */
+type Comparand<T> = [NonNullable<T>] extends [never]
+  ? T
+  : [NonNullable<T>] extends [HasToNumber]
+    ? number | Extract<T, null | undefined>
+    : T;
+
+/**
+ * Comparison operators - only available for number | Date | toNumber-able.
+ * Deliberately distributive: a `number | null` field still gets `$gte` via the
+ * `number` arm of the union.
+ */
+type ComparableOperators<T> = T extends number | Date | HasToNumber
+  ? {
+      $gt?: Comparand<T>;
+      $gte?: Comparand<T>;
+      $lt?: Comparand<T>;
+      $lte?: Comparand<T>;
+    }
   : object;
 
 /**
@@ -25,10 +51,10 @@ type StringOperators<T> = T extends string
  * Equality operators - available for all types
  */
 type EqualityOperators<T> = {
-  $eq?: T;
-  $ne?: T;
-  $in?: T[];
-  $nin?: T[];
+  $eq?: Comparand<T>;
+  $ne?: Comparand<T>;
+  $in?: Comparand<T>[];
+  $nin?: Comparand<T>[];
 };
 
 /**
@@ -88,9 +114,11 @@ type IsPlainObject<T> = T extends Date
     ? false
     : T extends unknown[]
       ? false
-      : T extends object
-        ? true
-        : false;
+      : T extends HasToNumber
+        ? false
+        : T extends object
+          ? true
+          : false;
 
 /**
  * Query for a single field - either:
@@ -106,7 +134,7 @@ type FieldQuery<T> = [T] extends [never]
     ? // Nested plain object - recurse with Query<T> OR just check existence
       Query<NonNullable<T>> | { $exists?: boolean }
     : // Primitive, Date, Array - direct value or operators
-      T | PrimitiveOperators<T>;
+      Comparand<T> | PrimitiveOperators<T>;
 
 /**
  * Logical operators for combining queries
@@ -263,6 +291,19 @@ function toNumber(value: unknown): number | null {
 }
 
 /**
+ * Equality against a plain-number operand for `toNumber`-able values (e.g.
+ * `Decimal`). Reference equality is tried first so an operand that is itself a
+ * `Decimal` keeps the pre-coercion behavior it had on union-typed fields.
+ * Values that don't coerce never match, so callers fall through to a normal
+ * mismatch rather than throwing.
+ */
+function toNumberEquals(value: unknown, expected: unknown): boolean {
+  if (value === expected) return true;
+  const n = toNumber(value);
+  return n !== null && n === expected;
+}
+
+/**
  * Match a value against primitive operators
  */
 function matchOperators<T>(
@@ -290,6 +331,10 @@ function matchOperators<T>(
       if (value.getTime() !== expected.getTime()) {
         return fail(path, "$eq", expected, value);
       }
+    } else if (hasToNumber(value)) {
+      if (!toNumberEquals(value, expected)) {
+        return fail(path, "$eq", expected, value);
+      }
     } else if (value !== expected) {
       return fail(path, "$eq", expected, value);
     }
@@ -299,6 +344,10 @@ function matchOperators<T>(
     const notExpected = ops.$ne;
     if (value instanceof Date && notExpected instanceof Date) {
       if (value.getTime() === notExpected.getTime()) {
+        return fail(path, "$ne", `not ${notExpected}`, value);
+      }
+    } else if (hasToNumber(value)) {
+      if (toNumberEquals(value, notExpected)) {
         return fail(path, "$ne", `not ${notExpected}`, value);
       }
     } else if (value === notExpected) {
@@ -316,6 +365,10 @@ function matchOperators<T>(
       if (!arr.some((d) => d instanceof Date && d.getTime() === time)) {
         return fail(path, "$in", arr, value);
       }
+    } else if (hasToNumber(value)) {
+      if (!arr.some((n) => toNumberEquals(value, n))) {
+        return fail(path, "$in", arr, value);
+      }
     } else if (!arr.includes(value)) {
       return fail(path, "$in", arr, value);
     }
@@ -329,6 +382,10 @@ function matchOperators<T>(
     if (value instanceof Date) {
       const time = value.getTime();
       if (arr.some((d) => d instanceof Date && d.getTime() === time)) {
+        return fail(path, "$nin", `not in [${arr}]`, value);
+      }
+    } else if (hasToNumber(value)) {
+      if (arr.some((n) => toNumberEquals(value, n))) {
         return fail(path, "$nin", `not in [${arr}]`, value);
       }
     } else if (arr.includes(value)) {
@@ -673,6 +730,15 @@ function matchQueryInternal<T extends object>(
         ) {
           return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
         }
+      } else if (hasToNumber(fieldQuery)) {
+        // Decimal used as the query value - implicit $eq by number, mirroring
+        // the Date branch above. Without this it falls into the plain-object
+        // split below, where a class instance (methods on the prototype, so
+        // Object.keys is empty) yields neither leaf ops nor rest and matches
+        // anything that happens to be an object.
+        if (!toNumberEquals(fieldValue, toNumber(fieldQuery))) {
+          return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
+        }
       } else if (fieldQuery instanceof RegExp) {
         // RegExp instance - implicit $regex against a string field
         if (typeof fieldValue !== "string" || !fieldQuery.test(fieldValue)) {
@@ -739,6 +805,10 @@ function matchQueryInternal<T extends object>(
       // Direct value comparison (implicit $eq)
       if (fieldValue instanceof Date && fieldQuery instanceof Date) {
         if (fieldValue.getTime() !== fieldQuery.getTime()) {
+          return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
+        }
+      } else if (hasToNumber(fieldValue)) {
+        if (!toNumberEquals(fieldValue, fieldQuery)) {
           return fail(fieldPath, "$eq (implicit)", fieldQuery, fieldValue);
         }
       } else if (fieldValue !== fieldQuery) {
@@ -837,6 +907,12 @@ function formatValue(value: unknown): string {
     return `[${value.map(formatValue).join(", ")}]`;
   }
   if (typeof value === "string") return `"${value}"`;
+  if (hasToNumber(value)) {
+    // Render what we actually compared, not the instance — String() on a bare
+    // { toNumber } gives "[object Object]".
+    const n = toNumber(value);
+    if (n !== null) return String(n);
+  }
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
