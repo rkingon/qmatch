@@ -145,7 +145,7 @@ const qualified = match<Lead>({
 
 ### Time-based matching
 
-`$now` matches against the current time, broken into wall-clock parts in an IANA time zone (default `UTC`). It's plain data, so unlike `$where` it survives `JSON.stringify` — useful when queries cross a network boundary.
+`$now` matches against the current time, broken into wall-clock parts in a time zone (default `UTC`; any IANA name or offset `Intl` accepts). It's plain data, so unlike `$where` it survives `JSON.stringify` — useful when queries cross a network boundary. That holds only while the query avoids `$where`/`$fn`, and qmatch does no runtime validation, so check queries arriving from untrusted sources before matching.
 
 ```typescript
 // Mon–Thu 8:00–19:40, Fri 8:00–16:40, Sat 10:00–14:40 Eastern; closed Sunday

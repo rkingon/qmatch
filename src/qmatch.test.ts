@@ -2082,6 +2082,26 @@ describe("$now", () => {
     expect(q(lead)).toBe(true);
   });
 
+  it("accepts legacy aliases", () => {
+    const q = match<Lead>(
+      { $now: { $tz: "US/Eastern", hour: 20 } },
+      at("2026-11-07T01:00:00Z"),
+    );
+    expect(q(lead)).toBe(true);
+  });
+
+  it("skips the spring-forward gap and repeats the fall-back hour", () => {
+    const tz = "America/New_York";
+    const hourAt = (iso: string, hour: number) =>
+      match<Lead>({ $now: { $tz: tz, hour } }, at(iso))(lead);
+    // 2026-03-08: 01:59 EST is followed by 03:00 EDT.
+    expect(hourAt("2026-03-08T06:59:00Z", 1)).toBe(true);
+    expect(hourAt("2026-03-08T07:00:00Z", 3)).toBe(true);
+    // 2026-11-01: 01:30 happens twice.
+    expect(hourAt("2026-11-01T05:30:00Z", 1)).toBe(true);
+    expect(hourAt("2026-11-01T06:30:00Z", 1)).toBe(true);
+  });
+
   it("defaults to UTC", () => {
     const q = match<Lead>({ $now: { hour: 23 } }, at("2026-11-04T23:30:00Z"));
     expect(q(lead)).toBe(true);
@@ -2100,6 +2120,9 @@ describe("$now", () => {
     const opts = at("2026-11-04T12:00:00Z"); // Wed
     expect(match<Lead>({ $and: [{ $now: { weekday: 3 } }] }, opts)(lead)).toBe(true);
     expect(match<Lead>({ $not: { $now: { weekday: 3 } } }, opts)(lead)).toBe(false);
+    expect(
+      match<Lead>({ $or: [{ amount: 1 }, { $now: { weekday: 3 } }] }, opts)(lead),
+    ).toBe(true);
     expect(
       match<Lead>({ offers: { $some: { lender: "a", $now: { weekday: 3 } } } }, opts)(lead),
     ).toBe(true);
@@ -2124,6 +2147,19 @@ describe("$now", () => {
     expect(calls).toBe(1);
     expect(q(lead)).toBe(false);
     expect(calls).toBe(2);
+  });
+
+  it("shares one clock read across array elements and skips it when unused", () => {
+    let calls = 0;
+    const now = () => {
+      calls++;
+      return new Date("2026-11-04T12:00:00Z");
+    };
+    const many: Lead = { amount: 1, offers: [{ lender: "a" }, { lender: "b" }] };
+    expect(match<Lead>({ offers: { $every: { $now: { weekday: 3 } } } }, { now })(many)).toBe(true);
+    expect(calls).toBe(1);
+    expect(match<Lead>({ amount: 1 }, { now })(many)).toBe(true);
+    expect(calls).toBe(1);
   });
 
   it("uses the real clock by default", () => {

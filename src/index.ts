@@ -150,7 +150,7 @@ export interface NowView {
   minuteOfDay: number;
 }
 
-/** `$tz` is an IANA zone, defaulting to UTC. */
+/** `$tz` is any zone Intl accepts (IANA name or offset), defaulting to UTC. */
 export type NowQuery = { $tz?: string } & Query<NowView>;
 
 /**
@@ -422,7 +422,7 @@ function matchNow(
   const { $tz = "UTC", ...rest } = nowQuery as NowQuery;
   const formatter = typeof $tz === "string" ? getFormatter($tz) : null;
   if (!formatter) {
-    return fail(path, "$tz", "IANA time zone", $tz);
+    return fail(path, "$tz", "time zone", $tz);
   }
   const instant = ctx.now();
   if (!(instant instanceof Date) || Number.isNaN(instant.getTime())) {
