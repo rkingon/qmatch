@@ -105,3 +105,15 @@ match<Shapes>({ dec: { $contains: 1 } });
 // @ts-expect-error Money is treated as a number field, not a nested object
 match<Shapes>({ money: { currency: "USD" } });
 match<Shapes>({ money: { $gte: 100 } });
+
+// --- $now --------------------------------------------------------------------
+match<Shapes>({ $now: { $tz: "America/New_York", weekday: { $in: [1, 2] } } });
+match<Shapes>({ $now: { $or: [{ minuteOfDay: { $gte: 480, $lt: 1180 } }] } });
+match<Shapes>({ nested: { $now: { hour: 9 } } });
+match<Shapes>({ num: 1 }, { now: () => new Date() });
+// @ts-expect-error unknown NowView part
+match<Shapes>({ $now: { hours: 9 } });
+// @ts-expect-error $tz is a string
+match<Shapes>({ $now: { $tz: 5 } });
+// @ts-expect-error NowView parts are numbers
+match<Shapes>({ $now: { weekday: "Mon" } });
