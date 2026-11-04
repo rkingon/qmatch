@@ -143,6 +143,42 @@ const qualified = match<Lead>({
 });
 ```
 
+### Time-based matching
+
+`$now` matches against the current time, broken into wall-clock parts in an IANA time zone (default `UTC`). It's plain data, so unlike `$where` it survives `JSON.stringify` — useful when queries cross a network boundary.
+
+```typescript
+// Mon–Thu 8:00–19:40, Fri 8:00–16:40, Sat 10:00–14:40 Eastern; closed Sunday
+const isOpen = match<Lead>({
+  $now: {
+    $tz: 'America/New_York',
+    $or: [
+      { weekday: { $gte: 1, $lte: 4 }, minuteOfDay: { $gte: 8 * 60, $lt: 19 * 60 + 40 } },
+      { weekday: 5, minuteOfDay: { $gte: 8 * 60, $lt: 16 * 60 + 40 } },
+      { weekday: 6, minuteOfDay: { $gte: 10 * 60, $lt: 14 * 60 + 40 } },
+    ],
+  },
+});
+```
+
+| Part | Range |
+|------|-------|
+| `year` | e.g. `2026` |
+| `month` | `1`–`12` |
+| `day` | `1`–`31` |
+| `weekday` | `0` (Sunday)–`6`, same as `Date#getDay` |
+| `hour` | `0`–`23` |
+| `minute` | `0`–`59` |
+| `minuteOfDay` | `0`–`1439` |
+
+The clock is read at match time (once per call, shared by every `$now` in the query), not when the query is built. DST is handled by the zone. Windows that cross midnight are two `$or` branches. An unknown `$tz` fails the match rather than throwing.
+
+Inject a clock for tests or replay:
+
+```typescript
+const isOpenAt = match<Lead>(query, { now: () => new Date('2026-11-06T21:39:00Z') });
+```
+
 ## Operators
 
 ### Comparison (number | Date | Decimal)
@@ -278,6 +314,7 @@ match<Lead>({
 | `$or` | Any condition must match |
 | `$not` | Negates a query |
 | `$where` | Custom predicate function |
+| `$now` | Current time in a time zone (see [Time-based matching](#time-based-matching)) |
 
 ## Debugging with explain()
 
@@ -359,9 +396,9 @@ match<User>({ age: { $in: ['18', '21'] } });  // Should be number[]
 
 ## API Reference
 
-### `match<T>(query: Query<T>): Matcher<T>`
+### `match<T>(query: Query<T>, options?: MatchOptions): Matcher<T>`
 
-Creates a matcher function from a query.
+Creates a matcher function from a query. `options.now` overrides the clock used by `$now`.
 
 ```typescript
 const matcher = match<User>({ status: 'active' });
@@ -369,7 +406,7 @@ matcher(user);           // boolean
 matcher.explain(user);   // ExplainResult
 ```
 
-### `explain<T>(query: Query<T>, item: T): ExplainResult`
+### `explain<T>(query: Query<T>, item: T, options?: MatchOptions): ExplainResult`
 
 Standalone function to explain why an item matches or doesn't match.
 
@@ -380,7 +417,7 @@ const result = explain({ status: 'active' }, user);
 ### Types
 
 ```typescript
-import type { Query, Matcher, ExplainResult } from 'qmatch';
+import type { Query, Matcher, ExplainResult, MatchOptions, NowView, NowQuery } from 'qmatch';
 
 // Define queries with full type checking
 const query: Query<User> = { ... };

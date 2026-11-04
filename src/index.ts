@@ -137,6 +137,23 @@ type FieldQuery<T> = [T] extends [never]
       Comparand<T> | PrimitiveOperators<T>;
 
 /**
+ * The current time as wall-clock parts in `$now.$tz`. `weekday` is 0 = Sunday,
+ * matching `Date#getDay`; `month` is 1-based.
+ */
+export interface NowView {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+  hour: number;
+  minute: number;
+  minuteOfDay: number;
+}
+
+/** `$tz` is an IANA zone, defaulting to UTC. */
+export type NowQuery = { $tz?: string } & Query<NowView>;
+
+/**
  * Logical operators for combining queries
  */
 type LogicalOperators<T> = {
@@ -144,6 +161,7 @@ type LogicalOperators<T> = {
   $or?: Query<T>[];
   $not?: Query<T>;
   $where?: (item: T) => boolean;
+  $now?: NowQuery;
 };
 
 /**
@@ -180,6 +198,11 @@ export interface ExplainResult {
   };
 }
 
+export interface MatchOptions {
+  /** Clock for `$now`. Read at most once per match/explain call. */
+  now?: () => Date;
+}
+
 /**
  * A matcher function that can also explain why items don't match
  */
@@ -214,7 +237,13 @@ const LEAF_OPERATOR_KEYS = new Set([
 
 // Logical operators combine queries against an object/item. They are handled by
 // matchQueryInternal and can legitimately appear alongside sibling field keys.
-const LOGICAL_OPERATOR_KEYS = new Set(["$and", "$or", "$not", "$where"]);
+const LOGICAL_OPERATOR_KEYS = new Set([
+  "$and",
+  "$or",
+  "$not",
+  "$where",
+  "$now",
+]);
 
 // Sub-operators allowed inside { $size: { ... } }. Anything else (or an empty
 // object) is rejected so we don't silently match like the bugs fixed in #7/#8.
@@ -303,6 +332,105 @@ function toNumberEquals(value: unknown, expected: unknown): boolean {
   return n !== null && n === expected;
 }
 
+interface MatchContext {
+  now: () => Date;
+}
+
+function createContext(options?: MatchOptions): MatchContext {
+  const clock = options?.now ?? (() => new Date());
+  // One instant per top-level call, so every $now node (and every element of a
+  // long $some/$every) sees the same time.
+  let instant: Date | undefined;
+  return {
+    now: () => {
+      if (instant === undefined) instant = clock();
+      return instant;
+    },
+  };
+}
+
+const WEEKDAYS: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+};
+
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/** Returns null for an unknown zone rather than letting Intl throw. */
+function getFormatter(timeZone: string): Intl.DateTimeFormat | null {
+  let formatter = formatters.get(timeZone);
+  if (formatter) return formatter;
+  try {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      // h23, not hour12: false — the latter renders midnight as "24" on some
+      // engines.
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      weekday: "short",
+      hour: "numeric",
+      minute: "numeric",
+    });
+  } catch {
+    return null;
+  }
+  // Intl accepts any casing and legacy aliases; caching only canonical names
+  // keeps a query-supplied $tz from growing the cache without bound.
+  if (formatter.resolvedOptions().timeZone === timeZone) {
+    formatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+function toNowView(instant: Date, formatter: Intl.DateTimeFormat): NowView {
+  const parts: Record<string, string> = {};
+  for (const { type, value } of formatter.formatToParts(instant)) {
+    parts[type] = value;
+  }
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: WEEKDAYS[parts.weekday],
+    hour,
+    minute,
+    minuteOfDay: hour * 60 + minute,
+  };
+}
+
+function matchNow(
+  nowQuery: unknown,
+  path: string,
+  ctx: MatchContext,
+): MatchResult {
+  if (
+    nowQuery === null ||
+    typeof nowQuery !== "object" ||
+    Array.isArray(nowQuery)
+  ) {
+    return fail(path, "$now", "query object", nowQuery);
+  }
+  const { $tz = "UTC", ...rest } = nowQuery as NowQuery;
+  const formatter = typeof $tz === "string" ? getFormatter($tz) : null;
+  if (!formatter) {
+    return fail(path, "$tz", "IANA time zone", $tz);
+  }
+  const instant = ctx.now();
+  if (!(instant instanceof Date) || Number.isNaN(instant.getTime())) {
+    return fail(path, "$now", "clock to return a valid Date", instant);
+  }
+  return matchQueryInternal(toNowView(instant, formatter), rest, path, ctx);
+}
+
 /**
  * Match a value against primitive operators
  */
@@ -310,6 +438,7 @@ function matchOperators<T>(
   value: T,
   operators: PrimitiveOperators<T>,
   path: string,
+  ctx: MatchContext,
 ): MatchResult {
   const ops = operators as Record<string, unknown>;
 
@@ -526,6 +655,7 @@ function matchOperators<T>(
         value.length,
         sizeQuery as PrimitiveOperators<number>,
         `${path}.$size`,
+        ctx,
       );
       if (!result.matched) return result;
     } else {
@@ -550,6 +680,7 @@ function matchOperators<T>(
           element as Record<string, unknown>,
           subQuery as Query<Record<string, unknown>>,
           `${path}[${i}]`,
+          ctx,
         ).matched;
       }
       if (isOperatorObject(subQuery)) {
@@ -557,6 +688,7 @@ function matchOperators<T>(
           element,
           subQuery as PrimitiveOperators<unknown>,
           `${path}[${i}]`,
+          ctx,
         ).matched;
       }
       return element === subQuery;
@@ -585,12 +717,14 @@ function matchOperators<T>(
           element as Record<string, unknown>,
           subQuery as Query<Record<string, unknown>>,
           `${path}[${i}]`,
+          ctx,
         );
       } else if (isOperatorObject(subQuery)) {
         result = matchOperators(
           element,
           subQuery as PrimitiveOperators<unknown>,
           `${path}[${i}]`,
+          ctx,
         );
       } else {
         result =
@@ -642,6 +776,7 @@ function matchQueryInternal<T extends object>(
   item: T,
   query: Query<T>,
   path: string,
+  ctx: MatchContext,
 ): MatchResult {
   // Handle $where first (query-level custom function)
   if ("$where" in query) {
@@ -649,6 +784,11 @@ function matchQueryInternal<T extends object>(
     if (typeof fn === "function" && !fn(item)) {
       return fail(path || "(root)", "$where", "function to return true", false);
     }
+  }
+
+  if ("$now" in query) {
+    const result = matchNow(query.$now, path ? `${path}.$now` : "$now", ctx);
+    if (!result.matched) return result;
   }
 
   // Handle $and - all must match
@@ -660,6 +800,7 @@ function matchQueryInternal<T extends object>(
           item,
           conditions[i],
           `${path}$and[${i}]`,
+          ctx,
         );
         if (!result.matched) return result;
       }
@@ -679,7 +820,7 @@ function matchQueryInternal<T extends object>(
         );
       }
       const anyMatch = conditions.some(
-        (q) => matchQueryInternal(item, q, "").matched,
+        (q) => matchQueryInternal(item, q, "", ctx).matched,
       );
       if (!anyMatch) {
         return fail(
@@ -695,7 +836,7 @@ function matchQueryInternal<T extends object>(
   // Handle $not - negation
   if ("$not" in query) {
     const notQuery = query.$not;
-    if (notQuery && matchQueryInternal(item, notQuery, "").matched) {
+    if (notQuery && matchQueryInternal(item, notQuery, "", ctx).matched) {
       return fail(
         path || "(root)",
         "$not",
@@ -775,6 +916,7 @@ function matchQueryInternal<T extends object>(
             fieldValue,
             leafOps as PrimitiveOperators<unknown>,
             fieldPath,
+            ctx,
           );
           if (!result.matched) return result;
         }
@@ -797,6 +939,7 @@ function matchQueryInternal<T extends object>(
             fieldValue as Record<string, unknown>,
             restQuery as Query<Record<string, unknown>>,
             fieldPath,
+            ctx,
           );
           if (!result.matched) return result;
         }
@@ -853,9 +996,13 @@ function arraysEqual(a: unknown[], b: unknown[]): boolean {
  * }
  * ```
  */
-export function match<T extends object>(query: Query<T>): Matcher<T> {
-  const matcher = (item: T) => matchQueryInternal(item, query, "").matched;
-  matcher.explain = (item: T) => explain(query, item);
+export function match<T extends object>(
+  query: Query<T>,
+  options?: MatchOptions,
+): Matcher<T> {
+  const matcher = (item: T) =>
+    matchQueryInternal(item, query, "", createContext(options)).matched;
+  matcher.explain = (item: T) => explain(query, item, options);
   return matcher;
 }
 
@@ -874,8 +1021,9 @@ export function match<T extends object>(query: Query<T>): Matcher<T> {
 export function explain<T extends object>(
   query: Query<T>,
   item: T,
+  options?: MatchOptions,
 ): ExplainResult {
-  const result = matchQueryInternal(item, query, "");
+  const result = matchQueryInternal(item, query, "", createContext(options));
 
   if (result.matched) {
     return { matched: true };

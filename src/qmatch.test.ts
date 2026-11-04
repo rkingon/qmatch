@@ -2003,3 +2003,182 @@ describe("explain", () => {
     });
   });
 });
+
+describe("$now", () => {
+  interface Lead {
+    amount: number;
+    offers: { lender: string }[];
+  }
+  const lead: Lead = { amount: 10_000, offers: [{ lender: "a" }] };
+  const at = (iso: string) => ({ now: () => new Date(iso) });
+
+  // Mirrors a real lead-buyer window: Mon–Thu 8:00–19:40, Fri 8:00–16:40,
+  // Sat 10:00–14:40 Eastern, closed Sunday.
+  const postingHours = {
+    $tz: "America/New_York",
+    $or: [
+      { weekday: { $gte: 1, $lte: 4 }, minuteOfDay: { $gte: 8 * 60, $lt: 19 * 60 + 40 } },
+      { weekday: 5, minuteOfDay: { $gte: 8 * 60, $lt: 16 * 60 + 40 } },
+      { weekday: 6, minuteOfDay: { $gte: 10 * 60, $lt: 14 * 60 + 40 } },
+    ],
+  };
+
+  it("matches inside the window and not at the cutoff (EST)", () => {
+    // 2026-11-06 is a Friday, after DST ends (UTC-5).
+    const open = match<Lead>({ $now: postingHours }, at("2026-11-06T21:39:00Z"));
+    const closed = match<Lead>({ $now: postingHours }, at("2026-11-06T21:40:00Z"));
+    expect(open(lead)).toBe(true);
+    expect(closed(lead)).toBe(false);
+  });
+
+  it("follows DST (EDT)", () => {
+    // 2026-07-10 is a Friday, UTC-4.
+    expect(match<Lead>({ $now: postingHours }, at("2026-07-10T20:39:00Z"))(lead)).toBe(true);
+    expect(match<Lead>({ $now: postingHours }, at("2026-07-10T20:40:00Z"))(lead)).toBe(false);
+  });
+
+  it("is closed on Sunday", () => {
+    expect(match<Lead>({ $now: postingHours }, at("2026-11-08T17:00:00Z"))(lead)).toBe(false);
+  });
+
+  it("resolves weekday in the target zone, not UTC", () => {
+    // Sat 01:00Z is still Friday 20:00 in New York.
+    const q = match<Lead>(
+      { $now: { $tz: "America/New_York", weekday: 5, hour: 20 } },
+      at("2026-11-07T01:00:00Z"),
+    );
+    expect(q(lead)).toBe(true);
+  });
+
+  it("exposes every NowView part", () => {
+    const q = match<Lead>(
+      {
+        $now: {
+          $tz: "Asia/Tokyo",
+          year: 2026,
+          month: 1,
+          day: 1,
+          weekday: 4,
+          hour: 0,
+          minute: 5,
+          minuteOfDay: 5,
+        },
+      },
+      at("2025-12-31T15:05:00Z"),
+    );
+    expect(q(lead)).toBe(true);
+  });
+
+  it("renders midnight as hour 0", () => {
+    const q = match<Lead>({ $now: { hour: 0 } }, at("2026-11-04T00:00:00Z"));
+    expect(q(lead)).toBe(true);
+  });
+
+  it("accepts non-canonical zone names", () => {
+    const q = match<Lead>(
+      { $now: { $tz: "america/new_york", hour: 20 } },
+      at("2026-11-07T01:00:00Z"),
+    );
+    expect(q(lead)).toBe(true);
+  });
+
+  it("defaults to UTC", () => {
+    const q = match<Lead>({ $now: { hour: 23 } }, at("2026-11-04T23:30:00Z"));
+    expect(q(lead)).toBe(true);
+  });
+
+  it("composes with field criteria", () => {
+    const q = match<Lead>(
+      { amount: { $gte: 5000 }, $now: { weekday: { $ne: 0 } } },
+      at("2026-11-04T12:00:00Z"),
+    );
+    expect(q(lead)).toBe(true);
+    expect(q({ ...lead, amount: 1 })).toBe(false);
+  });
+
+  it("works under $and/$or/$not and nested positions", () => {
+    const opts = at("2026-11-04T12:00:00Z"); // Wed
+    expect(match<Lead>({ $and: [{ $now: { weekday: 3 } }] }, opts)(lead)).toBe(true);
+    expect(match<Lead>({ $not: { $now: { weekday: 3 } } }, opts)(lead)).toBe(false);
+    expect(
+      match<Lead>({ offers: { $some: { lender: "a", $now: { weekday: 3 } } } }, opts)(lead),
+    ).toBe(true);
+    expect(
+      match<Lead>({ offers: { $some: { lender: "a", $now: { weekday: 4 } } } }, opts)(lead),
+    ).toBe(false);
+  });
+
+  it("survives a JSON round-trip", () => {
+    const query = JSON.parse(JSON.stringify({ $now: postingHours }));
+    expect(match<Lead>(query, at("2026-11-06T21:39:00Z"))(lead)).toBe(true);
+  });
+
+  it("reads the clock at match time, once per call", () => {
+    let calls = 0;
+    const times = ["2026-11-04T12:00:00Z", "2026-11-04T23:00:00Z"];
+    const q = match<Lead>(
+      { $now: { hour: { $lt: 20 } }, $and: [{ $now: { hour: { $lt: 20 } } }] },
+      { now: () => new Date(times[calls++]) },
+    );
+    expect(q(lead)).toBe(true);
+    expect(calls).toBe(1);
+    expect(q(lead)).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it("uses the real clock by default", () => {
+    const hour = new Date().getUTCHours();
+    // Tolerate the hour rolling over between the two reads.
+    expect(
+      match<Lead>({ $now: { hour: { $in: [hour, (hour + 1) % 24] } } })(lead),
+    ).toBe(true);
+  });
+
+  it("fails on an unknown time zone instead of throwing", () => {
+    const q = match<Lead>({ $now: { $tz: "Mars/Olympus_Mons" } });
+    expect(q(lead)).toBe(false);
+    expect(q.explain(lead).failure).toMatchObject({
+      path: "$now",
+      operator: "$tz",
+      actual: "Mars/Olympus_Mons",
+    });
+  });
+
+  it("fails on a non-object $now and an invalid clock", () => {
+    expect(match<Lead>({ $now: 1 } as never)(lead)).toBe(false);
+    expect(match<Lead>({ $now: {} }, { now: () => new Date("nope") })(lead)).toBe(false);
+  });
+
+  describe("explain", () => {
+    it("reports the failing part under $now", () => {
+      const result = explain<Lead>(
+        { $now: { $tz: "America/New_York", minuteOfDay: { $gte: 540 } } },
+        lead,
+        at("2026-11-04T13:00:00Z"), // 08:00 EST
+      );
+      expect(result.failure?.message).toBe(
+        '$now.minuteOfDay: $gte expected ">= 540", got 480',
+      );
+    });
+
+    it("reports $or windows as a single $now failure", () => {
+      const result = match<Lead>({ $now: postingHours }, at("2026-11-08T17:00:00Z")).explain(lead);
+      expect(result.failure).toMatchObject({ path: "$now", operator: "$or" });
+    });
+
+    it("prefixes nested paths", () => {
+      const result = explain<Lead>(
+        { offers: { $some: { $now: { weekday: 4 } } } },
+        lead,
+        at("2026-11-04T12:00:00Z"),
+      );
+      expect(result.failure?.operator).toBe("$some");
+      const nested = explain<{ o: { x: number } }>(
+        { o: { $now: { weekday: 4 } } },
+        { o: { x: 1 } },
+        at("2026-11-04T12:00:00Z"),
+      );
+      expect(nested.failure?.path).toBe("o.$now.weekday");
+    });
+  });
+});
